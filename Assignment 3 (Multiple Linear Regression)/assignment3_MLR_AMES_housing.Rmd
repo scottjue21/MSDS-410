@@ -1,0 +1,145 @@
+---
+title: "assignment3_MLR_AMES_housing"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+```
+
+```{r}
+mydata <- data.frame(ames_housing_data)
+
+mydata$TotalFloorSF <- mydata$FirstFlrSF + mydata$SecondFlrSF
+mydata$HouseAge <- mydata$YrSold - mydata$YearBuilt
+mydata$QualityIndex <- mydata$OverallQual * mydata$OverallCond
+mydata$logSalePrice <- log(mydata$SalePrice)
+mydata$price_sqft <- mydata$SalePrice/mydata$TotalFloorSF
+```
+
+```{r}
+subset_df <- mydata %>%
+  filter(
+    Zoning %in% c("RH", "RL", "RP", "RM", "FV"),
+    BldgType == "1Fam",
+    SaleCondition == "Normal",
+    TotalFloorSF < 4000,
+    Utilities == "AllPub",
+    GarageCars >= 1
+  )
+```
+
+```{r}
+subdat <-subset(subset_df,
+                   select=c("SalePrice",
+                            "FirstFlrSF", "SecondFlrSF",   #2 interior/interior
+                            "TotalBsmtSF", "GrLivArea",    #4 interior/interior
+                            "GarageArea", "ScreenPorch",    #6 interior/porch
+                            "LotArea", "LotFrontage",      #8 lot/lot
+                            "EnclosedPorch", "OpenPorchSF" #10 porch/porch
+                             ))
+
+model_df <- na.omit(subdat)
+```
+
+```{r}
+model3 <- lm(SalePrice~FirstFlrSF+SecondFlrSF+TotalBsmtSF+GrLivArea+GarageArea, data = model_df)
+```
+
+```{r}
+summary(model3)
+```
+```{r}
+anova(model3)
+```
+
+
+```{r}
+
+anova3 <- anova(model3)
+
+# Extract SSY & SSE
+SSY_3 <- sum(anova3$`Sum Sq`)
+SSE_3 <- anova3$`Sum Sq`[6]
+
+
+# Define k & n
+k_3 <- 5
+n_3 <- nrow(model_df)
+
+# Calculate numerator and denominator
+numerator_f_3 <- (SSY_3 - SSE_3) / k_3
+denominator_f_3 <-  SSE_3 / (n_3 - k_3 - 1)
+
+# Calculate F
+F <- round(numerator_f_3 / denominator_f_3, digits = 4)
+
+# Output
+print(paste("The F-statistic =", F))
+```
+```{r}
+model4 <- lm(SalePrice~FirstFlrSF+SecondFlrSF+TotalBsmtSF+GrLivArea+GarageArea+LotArea+LotFrontage, data = model_df)
+
+summary(model4)
+
+```
+
+```{r}
+anova(model4)
+```
+```{r}
+
+anova4 <- anova(model4)
+
+# Extract SSY & SSE
+SSY_4 <- sum(anova4$`Sum Sq`)
+SSE_4 <- anova4$`Sum Sq`[8]
+
+
+# Define k & n
+k_4 <- 7
+n_4 <- nrow(model_df)
+
+# Calculate numerator and denominator
+numerator_f_4 <- (SSY_4 - SSE_4) / k_4
+denominator_f_4 <-  SSE_4 / (n_4 - k_4 - 1)
+
+# Calculate F
+F <- round(numerator_f_4 / denominator_f_4, digits = 4)
+
+# Output
+print(paste("The F-statistic =", F))
+```
+```{r}
+# Nested F-test model 3 vs model 4
+
+# Get Regression Sum Sq. from both Models
+full_regression_ss <- sum(anova4$`Sum Sq`[1:7])
+reduced_regression_ss <- sum(anova3$`Sum Sq`[1:5])
+
+# Set s value: i.e. the number of additional independent variables
+s <- 2
+df <- nrow(model_df) - 7 - 1
+
+# Get MS Residual (full)
+full_ms_residual <- anova4$`Sum Sq`[8] / df
+
+# Numerator & Denominator
+numerator_nest <- (full_regression_ss - reduced_regression_ss) / s
+denominator_nest <- full_ms_residual
+
+# Compute F
+F_nest <- round(numerator_nest / denominator_nest, digits = 4)
+
+# Output
+print(paste("The F-statistic =", F_nest))
+
+```
+
