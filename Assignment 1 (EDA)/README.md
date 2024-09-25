@@ -1,4 +1,4 @@
-# Exploratory Data Analysis (EDA) of Ames Housing Data
+# Assignment 1: Exploratory Data Analysis (EDA) of Ames Housing Data
 
 ## Overview
 
