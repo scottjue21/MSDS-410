@@ -1,0 +1,226 @@
+---
+title: "MSDS410_assignment2"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(magrittr)
+library(kableExtra)
+library(ggplot2)
+```
+
+```{r}
+
+require(readxl)
+
+### set USStates data to mydata variable
+mydata <- read_excel('USStates.xlsx')
+head(mydata)
+```
+
+```{r}
+hist(mydata$HouseholdIncome)
+```
+
+```{r}
+
+myfunct1 <- function(x) {
+  c(
+    "Stand dev" = round(sd(x, na.rm = TRUE), digits = 2),
+    "Mean" = round(mean(x, na.rm = TRUE), digits = 2),
+    "Median" = round(median(x), digits = 2),
+    "Minimum" = round(min(x, na.rm = TRUE), digits = 2),
+    "Maximum" = round(max(x, na.rm = TRUE), digits = 2)
+  )
+}
+
+
+subdat <- subset(mydata, 
+                 select=-c(State, Region, Population))
+
+# Apply  the function to subset of data (remove demographic fields)
+summary_numeric_df <- subdat %>%
+  map( ~ myfunct1(.)) %>%
+  as.data.frame()
+
+# Retrieve Row Names
+row_names <- row.names(summary_numeric_df)
+
+
+# Re-combine the dataframe in more readable format
+summary_numeric_df <- cbind(summary_numeric_df, row_names) %>%
+  gather(key = Variable, value = value, -row_names) %>%
+  spread(key = row_names, value = value)
+# Table output
+kable(summary_numeric_df) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+
+```
+
+
+```{r}
+names(subdat)
+
+```
+```{r}
+par(mfrow = c(3, 3))
+
+plot(data = subdat, HouseholdIncome ~ HighSchool)
+plot(data = subdat, HouseholdIncome ~ College)
+plot(data = subdat, HouseholdIncome ~ Smokers)
+plot(data = subdat, HouseholdIncome ~ PhysicalActivity)
+plot(data = subdat, HouseholdIncome ~ Obese)
+plot(data = subdat, HouseholdIncome ~ NonWhite)
+plot(data = subdat, HouseholdIncome ~ HeavyDrinkers)
+plot(data = subdat, HouseholdIncome ~ TwoParents)
+plot(data = subdat, HouseholdIncome ~ Insured)
+
+```
+```{r}
+tab <- matrix(c(cor(subdat$HouseholdIncome, subdat$HighSchool),
+                cor(subdat$HouseholdIncome, subdat$College),
+                cor(subdat$HouseholdIncome, subdat$Smokers),
+                cor(subdat$HouseholdIncome, subdat$PhysicalActivity),
+                cor(subdat$HouseholdIncome, subdat$Obese),
+                cor(subdat$HouseholdIncome, subdat$NonWhite),
+                cor(subdat$HouseholdIncome, subdat$HeavyDrinkers),
+                cor(subdat$HouseholdIncome, subdat$TwoParents),
+                cor(subdat$HouseholdIncome, subdat$Insured)),
+                ncol=1, byrow=TRUE)
+colnames(tab) <- c('Pearson Correlation Coefficient')
+rownames(tab) <- c("HighSchool", "College",
+                   "Smokers","PhysicalActivity", "Obese", "NonWhite",
+                   "HeavyDrinkers", "TwoParents", "Insured")
+
+tab <- as.table(tab)
+
+kable(tab) %>%
+  kable_styling(bootstrap_options = "striped", full_width = F)
+
+```
+```{r}
+model1 <- lm(subdat$HouseholdIncome~subdat$College)
+
+summary(model1)
+```
+```{r}
+anova(model1)
+```
+
+```{r}
+subdat2 <- subdat
+
+# linear equation for predicted household income
+subdat2$y_hat <- 23.0664 + 0.9801*subdat2$College
+
+# residual for model
+subdat2$residual <- subdat2$HouseholdIncome - subdat2$y_hat
+
+```
+
+```{r}
+# Square each of the residuals and then add them up.  This is called sum of squared residuals, or sums of squared errors.
+
+subdat2$resid_sq <- subdat2$residual^2
+sumsquare_resid <- sum(subdat2$resid_sq)
+
+sumsquare_resid
+```
+
+```{r}
+# Deviate the mean of the Y’s from the value of Y for each record (i.e. Y – Y_bar).  Square each of the deviations and then add them up.  This is called sum of squares total.
+
+y_bar <- mean(subdat2$HouseholdIncome)
+
+subdat2$y_dev <- (subdat2$HouseholdIncome - y_bar)
+subdat2$square_y_dev <- (subdat2$y_dev)^2
+
+sumsquare_total <- sum(subdat2$square_y_dev)
+
+sumsquare_total
+```
+
+```{r}
+# Deviate the mean of the Y’s from the value of predicted (Y_hat) for each record (i.e. Y_hat – Y_bar).  Square each of these deviations and then add them up.  This is called the sum of squares due to regression.
+
+subdat2$yhat_dev <- subdat2$y_hat - y_bar
+
+subdat2$square_yhat_dev <- subdat2$yhat_dev^2
+
+sumsquare_reg <- sum(subdat2$square_yhat_dev)
+
+sumsquare_reg
+```
+
+```{r}
+# Calculate a statistic that is:   (Sum of Squares due to Regression) / (Sum of squares Total)
+
+sumsquare_reg/sumsquare_total
+
+```
+
+```{r}
+
+hist(subdat2$residual)
+
+# manually code standardized residuals
+
+n <- length(subdat2$residual)
+x_mean <- mean(subdat2$College)
+x_ss <- sum((subdat2$College-x_mean)^2)
+
+subdat2$leverage <- 1/n + (subdat2$College-x_mean)^2/x_ss
+
+subdat2$std_resid <- subdat2$residual/(6.392*sqrt(1-subdat2$leverage))
+
+# create histogram and scatterplot of standardized residuals
+par(mfrow = c(1, 2))
+hist(subdat2$std_resid)
+plot(subdat2$y_hat~subdat2$std_resid)
+```
+```{r}
+# create model2 using Obese as explanatory variable
+
+model2 <- lm(subdat2$HouseholdIncome~subdat2$Obese)
+
+summary(model2)
+```
+```{r}
+anova(model2)
+```
+
+```{r}
+library(reshape2)
+
+# create correlation heatmap
+
+cormat <- round(cor(subdat),2)
+melted_cormat <- melt(cormat)
+
+head(melted_corr_mat)
+
+ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) +
+  geom_tile() + 
+  geom_text(aes(Var2, Var1, label = value),
+          color = "black", size = 4)
+```
+```{r}
+
+subdat3 <- subdat2
+
+model3 <- lm(subdat3$Obese~subdat3$Smokers)
+
+summary(model3)
+```
+```{r}
+anova(model3)
+```
+
