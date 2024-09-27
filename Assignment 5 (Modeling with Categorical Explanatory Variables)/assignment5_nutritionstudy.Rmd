@@ -1,0 +1,358 @@
+---
+title: "MSDS410_Assignment5"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#install.packages("olsrr")
+library(lessR)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(olsrr)
+```
+
+```{r}
+# Omnibus F-test calculation
+omnibus_f <- function(model, alpha = 0.95) {
+  # Calculate F-statistic
+  anova_obj <- anova(model)
+  ssy <- sum(anova_obj$`Sum Sq`)
+  sse_index <- length(anova_obj$`Sum Sq`)
+  sse <- anova_obj$`Sum Sq`[sse_index]
+  k <- sum(anova_obj$Df[-sse_index])
+  n <- sum(anova_obj$Df) + 1
+  num <- (ssy - sse) / k
+  denom <- sse / (n - k - 1)
+  f <- round(num / denom, digits = 4)
+  
+  # Calculate critical F Value
+  crit_f <- round(qf(alpha, k, (n - k - 1)), digits = 4)
+  
+  # Output: Determine if reject the null
+  if (f > crit_f) {
+    print(paste("F-statistic of", f, "is greater than the critical value of", crit_f))
+    print("We can REJECT the null hypothesis")
+  } else {
+    print(paste("F-statistic of", f, "is less than the critical value of", crit_f))
+    print("We FAIL TO REJECT the null hypothesis")
+  }
+}
+```
+
+```{r}
+mydata <- NutritionStudy
+
+str(mydata)
+summary(mydata)
+```
+```{r}
+table(mydata$VitaminUse)
+table(mydata$PriorSmoke)
+```
+
+```{r}
+hist(mydata$Cholesterol)
+
+hist(mydata$Calories)
+
+hist(mydata$Fat)
+
+mydata <- mydata %>% filter(mydata$Calories<= 4000,
+                  mydata$BetaPlasma >0)
+
+summary(mydata)
+```
+```{r}
+mydata$d_Gender <- ifelse(mydata$Gender=="Male", 1, 0)
+mydata$d_Smoke <- ifelse(mydata$Smoke=="Yes", 1, 0)
+
+mydata$d1_Vitamin <- ifelse(mydata$VitaminUse=="No", 1, 0)
+mydata$d2_Vitamin <- ifelse(mydata$VitaminUse=="Occasional", 1, 0)
+mydata$d3_Vitamin <- ifelse(mydata$VitaminUse=="Regular", 1, 0)
+
+mydata$d1_PriorSmoke <- ifelse(mydata$PriorSmoke==1, 1, 0)
+mydata$d2_PriorSmoke <- ifelse(mydata$PriorSmoke==2, 1, 0)
+mydata$d3_PriorSmoke <- ifelse(mydata$PriorSmoke==3, 1, 0)
+
+mydata$alcoholconsumption <- ifelse(mydata$Alcohol==0, "None", ifelse(mydata$Alcohol > 10, "A lot", "Some"))
+
+mydata$d1_Alcohol <- ifelse(mydata$Alcohol== 0, 1,0)
+mydata$d2_Alcohol <- ifelse(mydata$Alcohol>0 & mydata$Alcohol<10, 1,0)
+mydata$d3_Alcohol <- ifelse(mydata$Alcohol > 10, 1,0)
+
+head(mydata)
+```
+```{r}
+# chol_priorsmoke <- mydata %>%                               # Summary by group using dplyr
+#   group_by(PriorSmoke) %>% 
+#   summarize(n = n(),
+#             Mean = mean(Cholesterol),
+#             Std_Dev = sd(Cholesterol),
+#             Min = min(Cholesterol),
+#             Q1 = quantile(Cholesterol, 0.25),
+#             Median = median(Cholesterol),
+#             Q3 = quantile(Cholesterol, 0.75),
+#             Max = max(Cholesterol))
+# 
+# knitr::kable(chol_priorsmoke)
+```
+```{r}
+ANOVA(Cholesterol~PriorSmoke, data=mydata)
+```
+```{r}
+model1 <- lm(Cholesterol~d2_PriorSmoke+d3_PriorSmoke, data=mydata)
+summary(model1)
+```
+```{r}
+anova(model1)
+```
+```{r}
+model2 <- lm(Cholesterol~d2_PriorSmoke+d3_PriorSmoke+Fat, data=mydata)
+summary(model2)
+```
+
+```{r}
+anova(model2)
+```
+
+```{r}
+```
+
+
+```{r}
+omnibus_f(model2)
+```
+
+
+```{r}
+mydata$y_hat2 <- predict(model2, mydata, type = "response")
+
+```
+```{r}
+mydata$residual2 <- mydata$Cholesterol - mydata$y_hat2
+
+mydata$leverage2 <- hatvalues(model2)
+mydata$std_resid2 <- rstandard(model2)
+
+# create histogram and scatterplot of standardized residuals
+par(mfrow = c(2, 2))
+hist(mydata$std_resid2)
+plot(mydata$y_hat2~mydata$std_resid2)
+```
+```{r}
+ols_plot_cooksd_chart(model2)
+```
+
+```{r} 
+grid.arrange(
+  ggplot(data=mydata, aes(x = Fat, y = y_hat2, color = factor(PriorSmoke))) +
+  geom_point() +
+  ggtitle("Predicted Cholesterol by Fat by PriorSmoke Group") +
+  ylab("Predicted Cholesterol Level") + 
+  xlab("Fat Level") +
+  labs(color = "Prior Smoke Group"),
+  ggplot(data=mydata, aes(x = Fat, y = Cholesterol, color = factor(PriorSmoke))) +
+  geom_point() +
+  ggtitle("Actual Cholesterol by Fat by PriorSmoke Group") +
+  ylab("Actual Cholesterol Level") + 
+  xlab("Fat Level") +
+  labs(color = "Prior Smoke Group")
+)
+  
+
+
+```
+
+```{r}
+mydata$fat_smoke1 <- mydata$Fat*mydata$d1_PriorSmoke
+mydata$fat_smoke2 <- mydata$Fat*mydata$d2_PriorSmoke
+mydata$fat_smoke3 <- mydata$Fat*mydata$d3_PriorSmoke
+```
+
+```{r}
+model3 <- lm(Cholesterol~Fat+d2_PriorSmoke+d3_PriorSmoke+fat_smoke2+fat_smoke3, data = mydata)
+summary(model3)
+```
+```{r}
+anova(model3)
+```
+
+```{r}
+
+mydata$y_hat3 <- predict(model3, mydata, type = "response")
+```
+
+```{r}
+omnibus_f(model3)
+```
+```{r}
+mydata$residual3 <- mydata$Cholesterol - mydata$y_hat3
+
+mydata$leverage3 <- hatvalues(model3)
+mydata$std_resid3 <- rstandard(model3)
+
+# create histogram and scatterplot of standardized residuals
+par(mfrow = c(2, 2))
+hist(mydata$std_resid3)
+plot(mydata$y_hat3~mydata$std_resid3)
+```
+```{r}
+ols_plot_cooksd_chart(model3)
+```
+
+
+```{r}
+grid.arrange(
+  ggplot(data=mydata, aes(x = Fat, y = y_hat3, color = factor(PriorSmoke))) +
+  geom_point() +
+  ggtitle("Predicted Cholesterol by Fat by PriorSmoke Group") +
+  ylab("Predicted Cholesterol Level") + 
+  xlab("Fat Level") +
+  labs(color = "Prior Smoke Group"),
+  ggplot(data=mydata, aes(x = Fat, y = Cholesterol, color = factor(PriorSmoke))) +
+  geom_point() +
+  ggtitle("Actual Cholesterol by Fat by PriorSmoke Group") +
+  ylab("Actual Cholesterol Level") + 
+  xlab("Fat Level") +
+  labs(color = "Prior Smoke Group")
+)
+  
+```
+```{r}
+anova(model3, model2, test='F')
+```
+```{r}
+# Save Anova objects
+full_anova <- anova(model3)
+reduced_anova <- anova(model2)
+# Get Regression Sum Sq. from both Models
+full_regression_ss <-
+  sum(full_anova$`Sum Sq`[1:(length(full_anova$`Sum Sq`) - 1)])
+reduced_regression_ss <-
+  sum(reduced_anova$`Sum Sq`[1:(length(reduced_anova$`Sum Sq`) - 1)])
+# Set s value: i.e. the number of additional independent variables
+s <- 2
+df <- 306
+# Get MS Residual (full)
+full_ms_residual <- full_anova$`Sum Sq`[length(full_anova$`Sum Sq`)] / df
+# Numerator & Denominator
+numerator_nest <- (full_regression_ss - reduced_regression_ss) / s
+denominator_nest <- full_ms_residual
+# Compute F
+F_nest <- round(numerator_nest / denominator_nest, digits = 4)
+# Output
+print(paste("The F-statistic =", F_nest))
+```
+```{r}
+# Function to Perform Partial F-Tests
+partial_f_test <- function(full_mod, partial_mod, alpha = 0.05) {
+  # Add ANOVA objects
+  full_anova <- anova(full_mod)
+  partial_anova <- anova(partial_mod)
+  
+  # Calculate sum of squares
+  full_regression_ss <-
+    sum(full_anova$`Sum Sq`[1:(length(full_anova$`Sum Sq`) - 1)])
+  reduced_regression_ss <-
+    sum(partial_anova$`Sum Sq`[1:(length(partial_anova$`Sum Sq`) - 1)])
+  
+  s <- sum(partial_anova$Df[1:(length(partial_anova$Df) - 1)])
+  df <- full_anova$Df[length(full_anova$Df)]
+  
+  # F-statistic computations
+  full_ms_residual <-
+    full_anova$`Sum Sq`[length(full_anova$`Sum Sq`)] / df
+  numerator <- (full_regression_ss - reduced_regression_ss) / s
+  denominator <- full_ms_residual
+  partial_f <- round(numerator / denominator, digits = 4)
+  
+  # Critical F
+  n <- sum(full_anova$Df) + 1
+  q_p <- sum(full_anova$Df[1:length(full_anova$Df) - 1])
+  df2 <- n - q_p - 1
+  critical_f <- round(qf(1 - alpha, s, df2), digits = 4)
+  
+  # Print based on reject or fail to reject
+  if (partial_f > critical_f) {
+    print(
+      paste(
+        "The F-statistic is",
+        partial_f,
+        "which is greater than the critical value of",
+        critical_f
+      )
+    )
+    print("Therefore we can REJECT the null hypothesis")
+  } else {
+    print(
+      paste(
+        "The F-statistic is",
+        partial_f,
+        "which is less than the critical value of",
+        critical_f
+      )
+    )
+    print("Therefore we FAIL TO REJECT the null hypothesis")
+  }
+}
+```
+
+
+```{r}
+fs_full <- lm(Cholesterol ~ Fat * Smoke, data = mydata)
+fs_red <- lm(Cholesterol ~ Fat + Smoke, data = mydata)
+summary(fs_full)
+summary(fs_red)
+```
+```{r}
+anova(fs_full, fs_red, test="F")
+```
+
+```{r}
+partial_f_test(fs_full, fs_red, alpha = .05)
+```
+```{r}
+# Save Anova objects
+full_anova <- anova(fs_full)
+reduced_anova <- anova(fs_red)
+# Get Regression Sum Sq. from both Models
+full_regression_ss <-
+  sum(full_anova$`Sum Sq`[1:(length(full_anova$`Sum Sq`) - 1)])
+reduced_regression_ss <-
+  sum(reduced_anova$`Sum Sq`[1:(length(reduced_anova$`Sum Sq`) - 1)])
+# Set s value: i.e. the number of additional independent variables
+s <- 1
+df <- 308
+# Get MS Residual (full)
+full_ms_residual <- full_anova$`Sum Sq`[length(full_anova$`Sum Sq`)] / df
+# Numerator & Denominator
+numerator_nest <- (full_regression_ss - reduced_regression_ss) / s
+denominator_nest <- full_ms_residual
+# Compute F
+F_nest <- round(numerator_nest / denominator_nest, digits = 4)
+# Output
+print(paste("The F-statistic =", F_nest))
+```
+```{r}
+fa_full <- lm(Cholesterol ~ Fat * alcoholconsumption, data = mydata)
+fa_red <- lm(Cholesterol ~ Fat + alcoholconsumption, data = mydata)
+summary(fa_full)
+summary(fa_red)
+```
+```{r}
+anova(fa_full, fa_red, test = "F")
+```
+```{r}
+fg_full <- lm(Cholesterol ~ Fat * Gender, data = mydata)
+fg_red <- lm(Cholesterol ~ Fat + Gender, data = mydata)
+summary(fg_full)
+summary(fg_red)
+
+anova(fg_full, fg_red, test = "F")
+```
+
