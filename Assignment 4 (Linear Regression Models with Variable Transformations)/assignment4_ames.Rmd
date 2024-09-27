@@ -1,0 +1,735 @@
+---
+title: "MSDS 410 Assignment 4"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(purrr)
+
+options(scipen = 999)
+```
+
+```{r}
+mydata <- data.frame(ames_housing_data)
+
+mydata$TotalFloorSF <- mydata$FirstFlrSF + mydata$SecondFlrSF
+mydata$HouseAge <- mydata$YrSold - mydata$YearBuilt
+mydata$QualityIndex <- mydata$OverallQual * mydata$OverallCond
+mydata$logSalePrice <- log(mydata$SalePrice)
+mydata$price_sqft <- mydata$SalePrice/mydata$TotalFloorSF
+```
+
+```{r}
+subset_df <- mydata %>%
+  filter(
+    Zoning %in% c("RH", "RL", "RP", "RM", "FV"),
+    BldgType == "1Fam",
+    SaleCondition == "Normal",
+    GrLivArea < 4000,
+    Utilities == "AllPub",
+    GarageCars >= 1,
+    BedroomAbvGr > 0,
+    FullBath > 0
+  )
+```
+
+```{r}
+summary(subset_df)
+```
+```{r}
+table(subset_df$TotRmsAbvGrd)
+boxplot(subset_df$TotRmsAbvGrd)$out
+hist(subset_df$TotRmsAbvGrd)
+
+plot(subset_df$SalePrice~subset_df$HouseAge)
+```
+```{r}
+subset_df <- subset_df %>%
+  filter(TotRmsAbvGrd <= 9)
+```
+
+
+
+```{r}
+par(mfrow = c(1, 3))
+hist(subset_df$price_sqft)
+boxplot(subset_df$price_sqft)
+plot(price_sqft~HouseAge, data = subset_df)
+```
+```{r}
+# identify extreme outliers by price_sqft
+quartiles <- quantile(subset_df$price_sqft, probs=c(.25, .75), na.rm = FALSE)
+IQR <- IQR(subset_df$price_sqft)
+ 
+ext_lower <- quartiles[1] - 3*IQR
+ext_upper <- quartiles[2] + 3*IQR 
+ 
+extr_out_price_sqft <- subset(subset_df, subset_df$price_sqft < ext_lower | subset_df$price_sqft > ext_upper)
+extr_out_price_sqft 
+```
+
+
+```{r}
+ggplot(data = subset_df, aes(x = Neighborhood, y = SalePrice, group = Neighborhood)) + geom_boxplot(fill = "orange2") +
+  ggtitle("Boxplots of SalePrice by NeighborHood") + theme(plot.title = element_text(size = 10, hjust = 0.5)) + 
+  theme(axis.text = element_text(angle = 90, vjust=0.5, hjust=1))
+```
+
+```{r}
+highsale_df <- subset_df %>%
+  filter(SalePrice > 400000)
+```
+
+```{r}
+table(highsale_df$Neighborhood)
+```
+```{r}
+ggplot(data = subset_df, aes(x = Neighborhood, y = GrLivArea, group = Neighborhood)) + geom_boxplot(fill = "orange2") +
+  ggtitle("Boxplots of GrLivArea by NeighborHood") + theme(plot.title = element_text(size = 10, hjust = 0.5)) + 
+  theme(axis.text = element_text(angle = 90, vjust=0.5, hjust=1))
+```
+
+```{r}
+table(subset_df$Neighborhood)
+```
+
+```{r}
+subset(subset_df, subset_df$price_sqft < ext_lower | subset_df$price_sqft > ext_upper)
+```
+```{r}
+subset_df <- subset_df %>%
+  filter(SID != 1064)
+```
+
+```{r}
+nrow(subset(subset_df, subset_df$price_sqft < ext_lower | subset_df$price_sqft > ext_upper))
+```
+```{r}
+hist(subset_df$SalePrice)
+```
+```{r}
+plot(SalePrice~GrLivArea, data = subset_df)
+```
+
+```{r}
+# identify extreme outliers by sale price
+quartiles <- quantile(subset_df$SalePrice, probs=c(.25, .75), na.rm = FALSE)
+IQR <- IQR(subset_df$SalePrice)
+ 
+ext_lower <- quartiles[1] - 3*IQR
+ext_upper <- quartiles[2] + 3*IQR 
+ 
+extr_out_SP <- subset(subset_df, subset_df$SalePrice < ext_lower | subset_df$SalePrice > ext_upper)
+extr_out_SP 
+```
+```{r}
+hist(subset_df$GrLivArea)
+boxplot(subset_df$GrLivArea)
+        
+hist(subset_df$TotalBsmtSF)
+boxplot(subset_df$TotalBsmtSF)
+
+```
+```{r}
+subset_df %>% filter(GrLivArea > 2800)
+```
+```{r}
+nrow(subset_df %>% filter(GrLivArea > 2800))/nrow(subset_df)
+```
+```{r}
+subset_df <- subset_df %>% filter(GrLivArea <= 2800,
+                                  TotalBsmtSF <= 2000)
+```
+
+
+
+```{r}
+subset_df_num <- subset_df %>% select(where(is.numeric))
+summary(subset_df_num)
+```
+
+
+```{r}
+myfunct2 <- function(x) {
+  c(
+    "NA Observations" = round(sum(is.na(x)))
+    #"Zero Obs" = round(sum(if_else(x == 0, 1, 0)))
+  )
+}
+na_df <- subset_df_num %>%
+  map( ~ myfunct2(.)) %>%
+  as.data.frame()
+row_names <- row.names(na_df)
+na_df <- cbind(na_df, row_names) %>%
+  gather(key = key, value = value,-row_names) %>%
+  spread(key = row_names, value = value)
+na_df %>%
+  mutate(Variable = key) %>%
+  select(Variable, `NA Observations`) %>%
+  filter(`NA Observations` > 0)
+```
+The *MasVnrArea* variable will be imputed with zeros since it's possible that houses do not have that particular feature, imputing a zero will effectively be the same as not having a masonry veneer area. The *LotFrontage* variable will be imputed with the **Median** value. This variable is the linear feet of street connected to the property so it doesn't make sense to impute to zero since properties need to be connected to the street.The NA observations for *BsmtFullBath* and *BsmtHalfBath* will also be imputed with zero since we assume that the missing value means that there is no full or half bath in the basement.
+
+```{r}
+subset_df_num <- subset_df_num %>%
+  mutate(
+    LotFrontage = replace_na(LotFrontage, median(LotFrontage, na.rm = TRUE)),
+    MasVnrArea = replace_na(MasVnrArea, 0)
+  )
+```
+
+```{r}
+summary(subset_df_num)
+```
+```{r}
+## Summary table of numeric variables
+myfunct3 <- function(x) {
+  c("Zero Obs" = round(sum(if_else(x == 0, 1, 0))))
+}
+zero_df <- subset_df_num %>%
+  map(~ myfunct3(.)) %>%
+  as.data.frame()
+row_names <- row.names(zero_df)
+zero_df <- cbind(zero_df, row_names) %>%
+  gather(key = key, value = value, -row_names) %>%
+  spread(key = row_names, value = value)
+zero_df <- zero_df %>%
+  mutate(
+    "Zero Obs Percent" = scales::percent(`Zero Obs` / nrow(subset_df_num), accuracy = 3L),
+    Variable = key
+  ) %>%
+  select(Variable, `Zero Obs`, `Zero Obs Percent`)
+  
+zero_df <- zero_df[order(zero_df$`Zero Obs Percent`, decreasing = TRUE), ]
+    
+knitr::kable(zero_df)
+```
+
+```{r}
+# drop houses with zero basement sf and with zero kitchens above ground
+subset_df_num <- subset_df_num %>%
+  filter(TotalBsmtSF > 0,
+         KitchenAbvGr >0
+         )
+```
+
+*HouseAge* is ok to have as 0 since it means it is a new house.
+
+```{r}
+subdat <-subset(subset_df_num,
+                   select=c("SalePrice", "logSalePrice", "price_sqft",
+                            "FirstFlrSF",
+                            "TotalBsmtSF", "GrLivArea",
+                            "GarageArea", "TotalFloorSF",
+                            "LotArea", "LotFrontage",
+                            "OverallQual", "QualityIndex",
+                            "HouseAge"
+                             ))
+```
+
+```{r}
+data_cor1 <- as.data.frame(
+                cor(subdat[ , colnames(subdat) != "SalePrice"],
+                subdat$SalePrice))
+
+colnames(data_cor1) <- c('Pearson_Corr_(SalePrice)')
+
+data_cor1 <- cbind(Variable = rownames(data_cor1), data_cor1)
+rownames(data_cor1) <- 1:nrow(data_cor1)
+
+data_cor1 <- data_cor1[order(-data_cor1$`Pearson_Corr_(SalePrice)`), ]
+
+knitr::kable(data_cor1)
+```
+```{r}
+data_cor2 <- as.data.frame(
+                cor(subdat[ , colnames(subdat) != "logSalePrice"],
+                subdat$logSalePrice))
+
+colnames(data_cor2) <- c('Pearson_Corr_(logSalePrice)')
+data_cor2 <- cbind(Variable = rownames(data_cor2), data_cor2)
+rownames(data_cor2) <- 1:nrow(data_cor2)
+
+data_cor2 <- data_cor2[order(-data_cor2$`Pearson_Corr_(logSalePrice)`), ]
+
+knitr::kable(data_cor2)
+```
+```{r}
+data_cor3 <- as.data.frame(
+                cor(subdat[ , colnames(subdat) != "price_sqft"],
+                subdat$price_sqft))
+
+colnames(data_cor3) <- c('Pearson_Corr_(price_sqft)')
+
+knitr::kable(data_cor3)
+```
+
+```{r}
+# remove price_sqft since not meaningful response variable
+
+model_df <-subset(subdat,
+                   select=c("SalePrice", "logSalePrice",
+                            "FirstFlrSF",
+                            "TotalBsmtSF", "GrLivArea",
+                            "GarageArea", "TotalFloorSF",
+                            "LotArea", "LotFrontage",
+                            "OverallQual", "QualityIndex",
+                            "HouseAge"
+                             ))
+```
+
+
+```{r}
+# Summary table of numeric variables
+myfunct1 <- function(x) {
+  c(
+    "SD" = round(sd(x, na.rm = TRUE), digits = 0),
+    "Mean" = round(mean(x, na.rm = TRUE), digits = 2),
+    "Med" = round(median(x ,na.rm = TRUE), digits = 0),
+    "Min" = round(min(x, na.rm = TRUE), digits = 0),
+    "Max" = round(max(x, na.rm = TRUE), digits = 0)
+  )
+}
+summary_numeric_df <- model_df %>%
+  map( ~ myfunct1(.)) %>%
+  as.data.frame()
+row_names <- row.names(summary_numeric_df)
+summary_numeric_df <- cbind(summary_numeric_df, row_names) %>%
+  gather(key = key, value = value,-row_names) %>%
+  spread(key = row_names, value = value)
+knitr::kable(summary_numeric_df)
+```
+
+
+```{r}
+summary(model_df)
+```
+
+
+```{r}
+library(scales)
+
+ggplot(model_df, aes(x=TotalFloorSF, y=SalePrice)) +
+  geom_point(color="blue", size=2) +
+  ggtitle("Scatter Plot of Sale Price vs Total Floor SF") +
+  theme(plot.title=element_text(lineheight=0.8, face="bold", hjust=0.5)) +
+  geom_smooth(method=lm, se=FALSE, color = "orange") +
+  scale_x_continuous(labels = label_comma()) +
+  scale_y_continuous(labels = label_comma())
+```
+
+```{r}
+model1 <- lm(SalePrice~TotalFloorSF, data = model_df)
+
+summary(model1)
+```
+
+```{r}
+anova(model1)
+```
+
+```{r}
+model_df$y_hat <- 22029.913 + 105.562*model_df$TotalFloorSF
+
+model_df$residual <- model_df$SalePrice - model_df$y_hat
+
+```
+
+```{r}
+# standardized residuals and leverage
+model_df$leverage1 <- hatvalues(model1)
+
+model_df$std_resid <- rstandard(model1)
+
+
+# create histogram and scatterplot of standardized residuals
+par(mfrow = c(2, 2))
+hist(model_df$std_resid)
+plot(model_df$y_hat~model_df$std_resid)
+```
+```{r}
+model_df$dffits1 <- dffits(model1)
+
+
+#find number of predictors in model
+p <- length(model1$coefficients)-1
+
+#find number of observations
+n <- nrow(model_df)
+
+#calculate DFFITS threshold value
+thresh <- 2*sqrt(p/n)
+
+thresh
+```
+
+
+```{r}
+model_df[order(-model_df['dffits1']), ]
+```
+```{r}
+#plot DFFITS values for each observation
+plot(model_df$dffits1, type = 'h', col = 'blue')
+
+#add horizontal lines at absolute values for threshold
+abline(h = thresh, lty = 2)
+abline(h = -thresh, lty = 2)
+```
+```{r}
+nrow(model_df %>%
+  filter(abs(dffits1) > thresh)
+)
+```
+
+
+```{r}
+lev_thresh1 <- 3*length(model1$coefficients)/nrow(model_df)
+
+lev_thresh1
+```
+```{r}
+model_df[order(-model_df$leverage1), ]
+```
+```{r}
+#plot leverage values for each observation
+plot(model_df$leverage1, type = 'h', col = 'blue')
+
+#add horizontal lines for threshold
+abline(h = lev_thresh1, lty = 2)
+```
+
+```{r}
+lev_inf1 <- model_df %>%
+  filter(model_df$leverage1 > lev_thresh1)
+
+nrow(lev_inf1)
+
+```
+
+```{r}
+dffits_inf1 <- model_df %>%
+  filter(abs(model_df$dffits1) > thresh)
+
+nrow(dffits_inf1)
+```
+
+
+```{r}
+model2 <- lm(SalePrice~TotalFloorSF+OverallQual, data = model_df)
+
+summary(model2)
+```
+```{r}
+anova(model2)
+```
+
+```{r}
+model_df$y_hat2 <- -69506.369 + 60.855*model_df$TotalFloorSF + 26103.013*model_df$OverallQual
+
+model_df$residual2 <- model_df$SalePrice - model_df$y_hat2
+
+model_df$leverage2 <- hatvalues(model2)
+model_df$std_resid2 <- rstandard(model2)
+
+# create histogram and scatterplot of standardized residuals
+par(mfrow = c(2, 2))
+hist(model_df$std_resid2)
+plot(model_df$y_hat2~model_df$std_resid2)
+```
+```{r}
+model_df$dffits2 <- dffits(model2)
+
+
+#find number of predictors in model
+p2 <- length(model2$coefficients)-1
+
+#calculate DFFITS threshold value
+thresh2 <- 2*sqrt(p2/n)
+
+thresh2
+```
+
+```{r}
+#plot DFFITS values for each observation
+plot(dffits(model2), type = 'h', col = 'blue')
+
+#add horizontal lines at absolute values for threshold
+abline(h = thresh2, lty = 2)
+abline(h = -thresh2, lty = 2)
+```
+```{r}
+model_df[order(-model_df$leverage2), ]
+```
+```{r}
+lev_thresh2 <- 3*length(model2$coefficients)/nrow(model_df)
+
+lev_thresh2
+```
+```{r}
+#plot leverage values for each observation
+plot(model_df$leverage2, type = 'h', col = 'blue')
+
+#add horizontal lines for threshold
+abline(h = lev_thresh2, lty = 2)
+```
+
+```{r}
+lev_inf2 <- model_df %>%
+  filter(model_df$leverage2 > lev_thresh2)
+
+nrow(lev_inf2)
+```
+```{r}
+dffits_inf2 <- model_df %>%
+  filter(abs(model_df$dffits2) > thresh2)
+
+nrow(dffits_inf2)
+```
+```{r}
+model3 <- lm(SalePrice~TotalFloorSF+OverallQual+GarageArea, data = model_df)
+
+summary(model3)
+```
+```{r}
+anova(model3)
+```
+```{r}
+model_df$y_hat3 <- -71201.392 + 54.811*model_df$TotalFloorSF + 21472.912*model_df$OverallQual + 80.338*model_df$GarageArea
+
+model_df$residual3 <- model_df$SalePrice - model_df$y_hat3
+
+model_df$leverage3 <- hatvalues(model3)
+model_df$std_resid3 <- rstandard(model3)
+
+# create histogram and scatterplot of standardized residuals
+par(mfrow = c(2, 2))
+hist(model_df$std_resid3)
+plot(model_df$y_hat3~model_df$std_resid3)
+```
+```{r}
+model_df[order(-model_df$std_resid), ]
+```
+
+
+```{r}
+model_df$dffits3 <- dffits(model3)
+
+
+#find number of predictors in model
+p3 <- length(model3$coefficients)-1
+
+#calculate DFFITS threshold value
+thresh3 <- 2*sqrt(p3/n)
+
+thresh3
+```
+```{r}
+#plot DFFITS values for each observation
+plot(dffits(model3), type = 'h', col = 'blue')
+
+#add horizontal lines at absolute values for threshold
+abline(h = thresh3, lty = 2)
+abline(h = -thresh3, lty = 2)
+```
+```{r}
+model3_hi <- model_df %>%
+  filter(abs(dffits3) > thresh3)
+```
+
+```{r}
+model3_hi[order(-abs(model3_hi$dffits3)),]
+```
+
+```{r}
+lev_thresh3 <- 3*length(model3$coefficients)/nrow(model_df)
+
+lev_thresh3
+```
+```{r}
+#plot leverage values for each observation
+plot(model_df$leverage3, type = 'h', col = 'blue')
+
+#add horizontal lines for threshold
+abline(h = lev_thresh3, lty = 2)
+```
+
+```{r}
+lev_inf3 <- model_df %>%
+  filter(model_df$leverage3 > lev_thresh3)
+
+nrow(lev_inf3)
+```
+
+```{r}
+dffits_inf3 <- model_df %>%
+  filter(abs(model_df$dffits3) > thresh3)
+
+nrow(dffits_inf3)
+```
+```{r}
+model4 <- lm(logSalePrice~TotalFloorSF+OverallQual+GarageArea, data = model_df)
+
+summary(model4)
+```
+```{r}
+anova(model4)
+```
+```{r}
+model_df$y_hat4 <- 10.67989850 + 0.00031010*model_df$TotalFloorSF + 0.11754934*model_df$OverallQual + 0.00039333*model_df$GarageArea
+
+model_df$residual4 <- model_df$logSalePrice - model_df$y_hat4
+
+model_df$leverag4 <- hatvalues(model4)
+model_df$std_resid4 <- rstandard(model4)
+
+# create histogram and scatterplot of standardized residuals
+par(mfrow = c(2, 2))
+hist(model_df$std_resid4)
+plot(model_df$y_hat~model_df$std_resid4)
+```
+
+
+
+```{r}
+model_df$dffits4 <- dffits(model4)
+
+
+#find number of predictors in model
+p4 <- length(model4$coefficients)-1
+
+#calculate DFFITS threshold value
+thresh4 <- 2*sqrt(p4/n)
+
+thresh4
+
+```
+
+```{r}
+#plot DFFITS values for each observation
+plot(dffits(model4), type = 'h', col = 'blue')
+
+#add horizontal lines at absolute values for threshold
+abline(h = thresh4, lty = 2)
+abline(h = -thresh4, lty = 2)
+
+```
+
+```{r}
+model4_hi <- model_df %>%
+  filter(abs(dffits4) > thresh4)
+```
+
+```{r}
+model4_hi[order(-abs(model4_hi$dffits4)),]
+```
+
+
+```{r}
+
+model3_rmse <- sqrt(mean(model3$residuals ^ 2))
+model4_rmse <- sqrt(mean(model4$residuals ^ 2))
+model3_summary <- summary(model3)
+model4_summary <- summary(model4)
+
+# Summary Table
+summary_df <- tibble(
+  "Model" = c(3, 4),
+  "R-Squared" = c(
+    model3_summary$r.squared,
+    model4_summary$r.squared
+  ),
+  "Adjusted R-Squared" = c(
+    model3_summary$adj.r.squared,
+    model4_summary$adj.r.squared
+  )
+)
+# Output
+knitr::kable(summary_df)
+```
+```{r}
+boxplot(model_df$SalePrice)
+```
+```{r}
+# create df with obs under dffits limit
+model_df_no_outlier_dffits4 <- model_df %>%
+                        filter(abs(model_df$dffits4) < thresh4)
+
+
+boxplot(model_df_no_outlier_extr$SalePrice)
+```
+
+```{r}
+model4_no_out_d <- lm(logSalePrice~TotalFloorSF+OverallQual+GarageArea, data = model_df_no_outlier_dffits4)
+
+summary(model4_no_out_d)
+```
+```{r}
+# number of high influential points removed DFFITS
+nrow(model_df)-nrow(model_df_no_outlier_dffits4)
+
+```
+```{r}
+model4_no_out_d_rmse <- sqrt(mean(model4_no_out_d$residuals ^ 2))
+model4_dffits <- summary(model4_no_out_d)
+
+# Summary Table
+summary_df2 <- tibble(
+  "Model" = c(4, '4_dffits'),
+  "Observations Removed" = c(0, nrow(model_df)-nrow(model_df_no_outlier_dffits4)  ),
+  "R-Squared" = c(
+    model4_summary$r.squared,
+    model4_dffits$r.squared
+  ),
+  "Adjusted R-Squared" = c(
+    model4_summary$adj.r.squared,
+    model4_dffits$adj.r.squared
+    
+  )
+)
+# Output
+knitr::kable(summary_df2)
+```
+```{r}
+model5 <- lm(SalePrice~TotalFloorSF+OverallQual+GarageArea+TotalBsmtSF+LotArea+HouseAge, data = model_df)
+
+summary(model5)
+```
+
+```{r}
+anova(model5)
+```
+
+```{r}
+model_df$y_hat5 <- -48836.2117 + 52.9681*model_df$TotalFloorSF + 15803.3495 *model_df$OverallQual + 
+                    41.9937*model_df$GarageArea + 35.0784*model_df$TotalBsmtSF + 0.8671*model_df$LotArea 
+                    - 328.7413*model_df$HouseAge
+                    
+model_df$residual5 <- model_df$SalePrice - model_df$y_hat5
+
+model_df$leverage5 <- hatvalues(model5)
+model_df$std_resid5 <- rstandard(model5)
+
+# create histogram and scatterplot of standardized residuals
+par(mfrow = c(1, 2))
+hist(model_df$std_resid5)
+plot(model_df$y_hat5~model_df$std_resid5)
+```
+```{r}
+model_df[order(-model_df$std_resid5),]
+```
+
+```{r}
+plot(model_df$SalePrice~model_df$std_resid5)
+plot(model_df$GrLivArea~model_df$std_resid5)
+```
+
+
