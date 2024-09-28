@@ -1,0 +1,322 @@
+---
+title: "assignment7_ICU"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(purrr)
+library(lessR)
+library(olsrr)
+
+options(scipen = 999)
+```
+
+```{r}
+mydata <- data.frame(icu)
+```
+```{r}
+str(mydata)
+head(mydata)
+attach(mydata)
+```
+```{r}
+sum(is.na(mydata))
+```
+
+```{r}
+names(mydata)
+```
+```{r}
+summary(mydata$AGE)
+```
+
+```{r}
+# library(reshape)
+# 
+# meltData <- melt(mydata)
+# 
+# ggplot(meltData, aes(factor(variable), value)) +
+#   geom_boxplot() + facet_wrap(~variable, scale="free")
+```
+```{r}
+mydata <- mydata %>%
+          filter (AGE >= 18)
+
+summary(mydata$AGE)
+```
+```{r}
+nrow(mydata)
+```
+
+```{r}
+table(mydata$RACE)
+```
+```{r}
+table(mydata$SEX)
+```
+```{r}
+par(mfrow=c(1,3))
+hist(mydata$AGE)
+hist(mydata$SYS)
+hist(mydata$HRA)
+```
+```{r}
+boxplot(mydata$AGE)
+```
+```{r}
+mean(mydata$AGE)
+```
+```{r}
+table(mydata$STA)
+```
+
+```{r}
+hist(mydata$STA)
+```
+
+```{r}
+Plot(AGE, STA, data=mydata)
+```
+```{r}
+mydata %>% filter (AGE < 50,
+                   STA == 1)
+```
+
+```{r}
+hist(mydata$AGE)
+
+```
+```{r}
+Histogram(AGE,by1=STA, data=mydata)
+```
+
+```{r}
+#RACE
+mytable <- table(mydata$STA, mydata$RACE)
+mytable
+```
+```{r}
+prop.table(mytable) # cell percentages
+prop.table(mytable, 1) # row percentages
+prop.table(mytable, 2) # column percentages
+```
+```{r}
+#CANCER
+mytable <- table(mydata$STA, mydata$CAN)
+mytable
+
+```
+```{r}
+prop.table(mytable) # cell percentages
+prop.table(mytable, 1) # row percentages
+prop.table(mytable, 2) # column percentages
+```
+```{r}
+#CPR
+mytable <- table(mydata$STA, mydata$CPR)
+mytable
+
+```
+```{r}
+prop.table(mytable) # cell percentages
+prop.table(mytable, 1) # row percentages
+prop.table(mytable, 2) # column percentages
+```
+```{r}
+# Level of Consciousness
+mytable <- table(mydata$STA, mydata$LOC)
+mytable
+
+```
+```{r}
+prop.table(mytable) # cell percentages
+prop.table(mytable, 1) # row percentages
+prop.table(mytable, 2) # column percentages
+```
+
+TASK 2
+```{r}
+
+
+mydata$sex_cat <- ifelse(mydata$SEX == 0, 'M', 'F')
+t2 <- table(mydata$STA, mydata$sex_cat)
+t2
+```
+```{r}
+men_prob <- round(97 / (97 + 24), digits = 3)
+female_prob <- round(58 / (58 + 16), digits = 3)
+
+men_prob
+female_prob
+```
+The odds ratio is calculated as follows:
+
+```{r}
+men_odds <- round(men_prob / (1 - men_prob),digits=3)
+women_odds <- round(female_prob / (1 - female_prob), digits = 3)
+m_or_w <- round(men_odds / women_odds, digits = 3)
+
+men_odds
+women_odds
+m_or_w
+```
+TASK 3
+```{r}
+mydata$typ_cat <- ifelse(mydata$TYP == 0, 'Elec', 'Emerg')
+t3 <- table(mydata$STA, mydata$typ_cat)
+t3
+```
+```{r}
+elect_prob <- round(51 / (51 + 2), digits = 3)
+emerg_prob <- round(104 / (38 + 104), digits = 3)
+
+elect_prob
+emerg_prob
+```
+The odds ratio is calculated as follows:
+
+```{r}
+elect_odds <- round(elect_prob / (1 - elect_prob), digits = 3)
+emerg_odds <- round(emerg_prob / (1 - emerg_prob), digits = 3)
+el_or_em <- round(elect_odds / emerg_odds, digits = 3)
+
+elect_odds
+emerg_odds
+el_or_em
+```
+
+```{r}
+summary(AGE)
+```
+
+```{r}
+# discretize AGE variable
+
+# AGE_CAT = 1  if AGE is in the interval [15,24]
+# AGE_CAT = 2  if AGE is in the interval [25,34]
+# AGE_CAT = 3  if AGE is in the interval 3 = [35,44]
+# AGE_CAT = 4  if AGE is in the interval 4 = [45,54]
+# AGE_CAT = 5  if AGE is in the interval 5 = [55,64]
+# AGE_CAT = 6  if AGE is in the interval 6 = [65,74]
+# AGE_CAT = 7  if AGE is in the interval 7 = [75,84]
+# AGE_CAT = 8  if AGE is in the interval 8 = [85,94]
+# AGE_CAT = 9  if AGE is in the interval 9 = 95 and over
+
+
+mydata$AGE_CAT <- ifelse(AGE<=24, 1,ifelse(AGE<=34,2,ifelse(AGE<=44,3,ifelse(AGE<=54,4,ifelse(AGE<=64,5,ifelse(AGE<=74,6,
+                   ifelse(AGE<=84,7,ifelse(AGE<=94,8,9))))))))
+
+
+STA_AGECAT <- mydata %>%                               # Summary by group using dplyr
+   group_by(AGE_CAT) %>% 
+   summarize(Mean = round(mean(STA),digits = 3))
+
+kable(STA_AGECAT)
+```
+```{r}
+plot(STA_AGECAT$Mean~STA_AGECAT$AGE_CAT)
+```
+
+```{r}
+model1 <- Logit(STA~AGE, data=mydata)
+model1
+```
+
+```{r}
+model1a <- glm(STA~AGE, family= binomial, data=mydata)
+summary(model1a)
+```
+```{r}
+#calculate p-value of overall Chi-Square statistic
+1-pchisq(197.9-191.55, 194-193)
+```
+Since this p-value is less than .05, we reject the null hypothesis. In other words, there is a statistically significant relationship between age and ICU patient outcome.
+
+```{r}
+m1BIC <- round(BIC(model1a), digits = 3)
+m1BIC
+```
+```{r}
+model1_pi <- predict(model1a, type = 'response')
+
+model1_pi[1:5]
+```
+
+```{r}
+mydata$logit1<- -2.923 + 0.026*mydata$AGE
+
+mydata$oddsratio1<-exp(mydata$logit1)
+mydata$pi1<-exp(mydata$logit1)/(1 + exp(mydata$logit1))
+
+summary(mydata$pi1)
+
+mydata$outcome1<-ifelse(mydata$pi1 > 0.5,1,0)
+
+mydata$logt <- log(mydata$pi1/(1-mydata$pi1))
+
+head(mydata)
+```
+```{r}
+head(mydata)
+```
+```{r}
+plot(mydata$logit1~mydata$AGE)
+```
+```{r}
+plot(model1_pi~mydata$AGE)
+```
+
+
+```{r}
+plot(mydata$pi1~mydata$AGE)
+
+ggplot(mydata, aes(x=AGE)) +
+  geom_point(aes(y=pi1), color ='blue') +
+  geom_point(aes(y=STA)) +
+  theme_minimal()
+  
+```
+
+```{r}
+plot(mydata$outcome1~mydata$AGE, ylim=c(0,1))
+```
+```{r}
+my_prob <- -2.923 + 0.026*34
+
+oddsratio2<-exp(my_prob)
+mypi<-exp(my_prob)/(1 + exp(my_prob))
+
+oddsratio2
+mypi
+```
+```{r}
+intercept <- -2.923 + 0.026*0
+intpi<-exp(intercept)/(1 + exp(intercept))
+intpi
+
+```
+
+```{r}
+model2 <- glm(STA~AGE+TYP, family= binomial, data=mydata)
+summary(model2)
+```
+```{r}
+model2_pi <- predict(model2, type = 'response')
+
+plot(model2_pi~mydata$AGE)
+
+```
+```{r}
+summary(model2_pi)
+```
+
+
