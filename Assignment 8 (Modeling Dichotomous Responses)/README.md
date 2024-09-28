@@ -1,6 +1,6 @@
 # Assignment 8: Modeling Dichotomous Responses with Logistic Regression
 
-## Introduction
+## Overview
 This analysis focuses on predicting whether a bottle of wine will be purchased based on its characteristics using a logistic regression model. The dataset contains approximately 12,000 observations, each representing a unique wine. The response variable, `Purchase`, indicates whether a wine was purchased (`1`) or not (`0`). As the response is dichotomous, logistic regression was chosen to model the probability of a wine being purchased. Key objectives of this analysis include assessing model fit, identifying significant predictors, and refining the model by removing variables that do not contribute to its predictive power.
 
 ## Methods and Techniques
