@@ -1,0 +1,638 @@
+---
+title: "assignmnet_8"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#install.packages('pROC')
+
+library(readr)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(purrr)
+library(lessR)
+library(olsrr)
+library(knitr)
+library(reshape2)
+library(pROC)
+
+options(scipen = 999)
+```
+
+```{r}
+mydata <- data.frame(wine)
+```
+```{r}
+str(mydata)
+head(mydata)
+```
+
+```{r}
+mydf <- mydata
+```
+
+```{r}
+##############################################
+# Functions
+##############################################
+# Summary table of numeric variables
+summary_func <- function(x) {
+  c(
+    "Std" = round(sd(x, na.rm = TRUE), digits = 2),
+    "Avg" = round(mean(x, na.rm = TRUE), digits = 2),
+    "Med" = round(median(x, na.rm = TRUE), digits = 2),
+    "Min" = round(min(x, na.rm = TRUE), digits = 2),
+    "Max" = round(max(x, na.rm = TRUE), digits = 2),
+    "NA Cnt" = sum(is.na(x)),
+    "< 0 Count" = sum(ifelse(x < 0, 1, 0), na.rm = TRUE),
+    "Med > 0" = round(median(ifelse(x < 0, NA, x), na.rm = TRUE), digits = 2)
+  )
+}
+##############################################
+# Dataframe Shape
+shape <- function(df) {
+  return(list(nrow(df), length(df)))
+}
+```
+```{r}
+mydf_shape <- shape(mydf)
+mydf_shape
+```
+```{r}
+# Summary Table of Numeric Variables
+summary_numeric_df <- mydf %>%
+  dplyr::select(-INDEX) %>%
+  select_if(is.numeric) %>%
+  map(~ summary_func(.)) %>%
+  as.data.frame()
+row_names <- row.names(summary_numeric_df)
+summary_numeric_df <- cbind(summary_numeric_df, row_names) %>%
+  gather(key = key, value = value,-row_names) %>%
+  spread(key = row_names, value = value)
+
+
+summary_numeric_df %>%
+  kable()
+```
+```{r}
+plot(mydf$Purchase~mydf$STARS)
+```
+```{r}
+STARS_sum <- mydf %>%                               # Summary by group using dplyr
+   group_by(STARS) %>% 
+   summarize(Mean = round(mean(Purchase),digits = 3))
+
+kable(STARS_sum)
+```
+
+
+```{r}
+# create star categorical variable
+mydf <- mydf %>%
+  mutate(rated = ifelse(is.na(STARS),0,1))
+
+# Get Rid of unnecessary columns
+mydf <- mydf %>%
+  dplyr::select(-INDEX,-STARS, -Cases)
+
+# Flip Negative Signs
+mydf <- mydf %>%
+  mutate_all(~if_else(. < 0, . * -1, . ))
+
+# Replace NA's with Median
+mydf <- mydf %>%
+  mutate_all(~if_else(is.na(.), median(., na.rm = TRUE), .))
+```
+
+```{r}
+# Summary Table of Numeric Variables
+new_summary_numeric_df <- mydf %>%
+  select_if(is.numeric) %>%
+  map( ~ summary_func(.)) %>%
+  as.data.frame()
+new_row_names <- row.names(new_summary_numeric_df)
+new_summary_numeric_df <-
+  cbind(new_summary_numeric_df, new_row_names) %>%
+  gather(key = key, value = value, -new_row_names) %>%
+  spread(key = new_row_names, value = value)
+new_summary_numeric_df %>%
+  kable()
+```
+### Histograms of Continuous Variables  
+Below is a grid of histograms of the continuous variables in the dataset. We can see that 3 variables appear to close to normally distributed while the others are right-skewed. The right-skewed variables could prove problematic during modeling.
+```{r}
+head(mydf)
+```
+
+```{r fig.height=8, fig.width=8}
+cdf <- mydf %>%
+  dplyr::select(-Purchase,-rated, -LabelAppeal)
+
+par(mfrow = c(4, 4))
+for (i in 1:12) {
+  hist(
+    x = cdf[[i]],
+    main = names(cdf[i]),
+    xlab = names(cdf[i]),
+    col = "blue"
+  )
+}
+
+```
+```{r}
+kable(table(mydf$Purchase, dnn = "Purchase"))
+```
+### Correlation of Variables  
+Below is a correlation matrix of the variables. There appears to be very little linear correlation between variables. The only relationship that stands out is Purchase-HasSTARS along with a could minor associations. This does not bode particularly well for our modeling, but it means that we don't have collinearity amongst of independent variables which is a good thing.
+
+```{r fig.align="left", fig.width=5, fig.height=5}
+corrplot::corrplot(cor(mydf))
+```
+
+## Train & Test Split  
+I've decided to perform a training and testing split of the dataset. I've dropped a few unimportant variables from the original dataset. Here are the variables and the explanation for dropping:  
+
+1. INDEX: Serves no purpose in the dataset.  
+2. STARS: Too many NA values, changed to binary variable.  
+3. Cases: There are only cases if there is a purchase, the variable is meaningless for modeling whether someone will make a purchase or not.  
+
+For the modeling portion of this project, I'll be employing a 70/30 split. This means that I'll be training models on 70% of the data and validating them on the remaining 30%. This will allow me to see if a model generalizes well to unseen data.
+
+```{r}
+# Set seed
+set.seed(123)
+# Random number between 0 & 1
+mydf$rand <- runif(n = dim(mydf)[1],
+                  min = 0,
+                  max = 1)
+# Create the splits
+train_df <- subset(mydf, rand < 0.7)
+test_df <- subset(mydf, rand >= 0.7)
+# Drop the rand column
+train_df <- train_df %>% dplyr::select(-rand)
+test_df <- test_df %>% dplyr::select(-rand)
+```
+```{r}
+# Summary of observations
+kable(data.frame(
+  "DataFrame" = c("Training Data", "Validation Data"),
+  "ObsCounts" = c(nrow(train_df), nrow(test_df)),
+  "PercentOfObs" = c(round(nrow(train_df) / nrow(mydf), digits = 3), round(nrow(test_df) / nrow(mydf), digits = 3))
+))
+```
+
+```{r}
+# Define the upper model as the FULL model
+upper.lm <- glm(Purchase ~ .,data=train_df, family = binomial);
+summary(upper.lm)
+
+# Define the lower model as the Intercept model
+lower.lm <- glm(Purchase ~ 1,data=train_df, family = binomial)
+
+# Need a SLR to initialize stepwise selection
+cases.lm <- glm(Purchase ~ Alcohol,data=train_df, family = binomial)
+summary(cases.lm)
+```
+```{r}
+library(MASS)
+
+# Call stepAIC() for variable selection
+forward.lm <- stepAIC(object=lower.lm,scope=list(upper=formula(upper.lm),lower=~1),
+direction=c('forward'));
+summary(forward.lm)
+```
+
+```{r}
+backward.lm <- stepAIC(object=upper.lm,direction=c('backward'));
+summary(backward.lm)
+```
+```{r}
+stepwise.lm <- stepAIC(object=cases.lm,scope=list(upper=formula(upper.lm),lower=~1),
+direction=c('both'));
+summary(stepwise.lm)
+```
+
+
+```{r}
+library(car)
+sort(vif(forward.lm),decreasing=TRUE)
+```
+
+```{r}
+sort(vif(backward.lm),decreasing=TRUE)
+```
+```{r}
+sort(vif(stepwise.lm),decreasing=TRUE)
+```
+```{r}
+AIC_list <-
+  c(AIC(forward.lm),
+    AIC(backward.lm),
+    AIC(stepwise.lm))
+BIC_list <-
+  c(BIC(forward.lm),
+    BIC(backward.lm),
+    BIC(stepwise.lm))
+knitr::kable(data.frame(
+  Model = c("Forward", "Backward", "Stepwise"),
+  AIC = AIC_list,
+  BIC = BIC_list
+))
+```
+```{r}
+model1 <- forward.lm
+summary(model1)
+anova(model1)
+
+```
+```{r}
+train_prob <- model1 %>% predict(train_df, type = "response")
+train_pred_class <- ifelse(train_prob > 0.5, 1, 0)
+table(train_df$Purchase, train_pred_class, dnn = c("Purchase", "Predict"))
+L_full<-logLik(model1)
+```
+```{r}
+m1_acc <- ifelse(train_df$Purchase==train_pred_class, 1, 0)
+m1_acc <- round(mean(m1_acc), digits = 3)
+```
+
+
+```{r}
+(1170+6411)
+```
+```{r}
+roccurve <- roc(Purchase ~ train_prob,data=train_df)
+plot(roccurve)
+auc(roccurve)
+
+m1_auc <- round(auc(roccurve), digits = 3)
+```
+```{r}
+###  Fit Reduced Model - remove sulphates
+
+model2 <- glm(Purchase ~ rated + AcidIndex + TotalSulfurDioxide + 
+    VolatileAcidity + pH + FreeSulfurDioxide, family = binomial, 
+    data = train_df)
+
+anova(model2)
+summary(model2)
+L_2<-logLik(model2)
+```
+```{r}
+train_prob <- model2 %>% predict(train_df, type = "response")
+train_pred_class <- ifelse(train_prob > 0.5, 1, 0)
+table(train_df$Purchase, train_pred_class, dnn = c("Purchase", "Predict"))
+```
+```{r}
+m2_acc <- ifelse(train_df$Purchase==train_pred_class, 1, 0)
+m2_acc <- round(mean(m2_acc), digits = 3)
+```
+```{r}
+1171+6412
+```
+
+
+```{r}
+chisquare_2 <- -2*(L_2 - L_full)
+critical_chi_2 <- qchisq(0.05,1,ncp=0,lower.tail=FALSE)
+predpr <- predict(model2, type=c("response"))
+roccurve <- roc(Purchase ~ predpr,data=train_df)
+plot(roccurve)
+auc(roccurve)
+
+m2_auc <- round(auc(roccurve), digits = 3)
+```
+
+```{r}
+###  Fit Reduced Model - remove FreeSulfurDioxide
+
+model3 <- glm(Purchase ~ rated + AcidIndex + TotalSulfurDioxide + 
+    VolatileAcidity + pH, family = binomial, 
+    data = train_df)
+
+anova(model3)
+summary(model3)
+L_3<-logLik(model3)
+```
+```{r}
+train_prob <- model3 %>% predict(train_df, type = "response")
+train_pred_class <- ifelse(train_prob > 0.5, 1, 0)
+table(train_df$Purchase, train_pred_class, dnn = c("Purchase", "Predict"))
+```
+```{r}
+m3_acc <- ifelse(train_df$Purchase==train_pred_class, 1, 0)
+m3_acc <- round(mean(m3_acc), digits = 3)
+```
+```{r}
+1166+6416
+```
+
+```{r}
+chisquare_3 <- -2*(L_3 - L_2)
+critical_chi_3 <- qchisq(0.05,1,ncp=0,lower.tail=FALSE)
+predpr <- predict(model3, type=c("response"))
+roccurve <- roc(Purchase ~ predpr,data=train_df)
+plot(roccurve)
+auc(roccurve)
+
+m3_auc <- round(auc(roccurve),digits = 3)
+```
+```{r}
+###  Fit Reduced Model - remove ph
+
+model4 <- glm(Purchase ~ rated + AcidIndex + TotalSulfurDioxide + 
+    VolatileAcidity, family = binomial, 
+    data = train_df)
+
+anova(model4)
+summary(model4)
+L_4<-logLik(model4)
+```
+```{r}
+train_prob <- model4 %>% predict(train_df, type = "response")
+train_pred_class <- ifelse(train_prob > 0.5, 1, 0)
+table(train_df$Purchase, train_pred_class, dnn = c("Purchase", "Predict"))
+```
+```{r}
+m4_acc <- ifelse(train_df$Purchase==train_pred_class, 1, 0)
+m4_acc <- round(mean(m4_acc), digits = 3)
+```
+```{r}
+1184+6405
+```
+
+```{r}
+chisquare_4 <- -2*(L_4 - L_3)
+critical_chi_4 <- qchisq(0.05,1,ncp=0,lower.tail=FALSE)
+predpr <- predict(model4, type=c("response"))
+roccurve <- roc(Purchase ~ predpr,data=train_df)
+plot(roccurve)
+auc(roccurve)
+
+m4_auc <- round(auc(roccurve),digits = 3)
+```
+```{r}
+###  Fit Reduced Model - remove VolatileAcidity
+
+model5 <- glm(Purchase ~ rated + AcidIndex + TotalSulfurDioxide, family = binomial, 
+    data = train_df)
+
+anova(model5)
+summary(model5)
+L_5<-logLik(model5)
+```
+```{r}
+train_prob <- model5 %>% predict(train_df, type = "response")
+train_pred_class <- ifelse(train_prob > 0.5, 1, 0)
+table(train_df$Purchase, train_pred_class, dnn = c("Purchase", "Predict"))
+```
+```{r}
+m5_acc <- ifelse(train_df$Purchase==train_pred_class, 1, 0)
+m5_acc <- round(mean(m5_acc), digits = 3)
+```
+```{r}
+1229+6335
+```
+
+```{r}
+chisquare_5 <- -2*(L_5 - L_4)
+critical_chi_5 <- qchisq(0.05,1,ncp=0,lower.tail=FALSE)
+predpr <- predict(model5, type=c("response"))
+roccurve <- roc(Purchase ~ predpr,data=train_df)
+plot(roccurve)
+auc(roccurve)
+
+m5_auc <- round(auc(roccurve), digits = 3)
+```
+```{r}
+###  Fit Reduced Model - remove TotalSulfurDioxide
+
+model6 <- glm(Purchase ~ rated + AcidIndex, family = binomial, 
+    data = train_df)
+
+anova(model6)
+summary(model6)
+L_6<-logLik(model6)
+```
+```{r}
+train_prob <- model6 %>% predict(train_df, type = "response")
+train_pred_class <- ifelse(train_prob > 0.5, 1, 0)
+table(train_df$Purchase, train_pred_class, dnn = c("Purchase", "Predict"))
+```
+```{r}
+m6_acc <- ifelse(train_df$Purchase==train_pred_class, 1, 0)
+m6_acc <- round(mean(m6_acc), digits = 3)
+```
+```{r}
+1335+6217
+```
+
+```{r}
+chisquare_6 <- -2*(L_6 - L_5)
+critical_chi_6 <- qchisq(0.05,1,ncp=0,lower.tail=FALSE)
+predpr <- predict(model6, type=c("response"))
+roccurve <- roc(Purchase ~ predpr,data=train_df)
+plot(roccurve)
+auc(roccurve)
+
+m6_auc <- round(auc(roccurve), digits = 3)
+```
+```{r}
+###  Fit Reduced Model - remove AcidIndex
+
+model7 <- glm(Purchase ~ rated, family = binomial, 
+    data = train_df)
+
+anova(model7)
+summary(model7)
+L_7<-logLik(model7)
+```
+```{r}
+train_prob <- model7 %>% predict(train_df, type = "response")
+train_pred_class <- ifelse(train_prob > 0.5, 1, 0)
+table(train_df$Purchase, train_pred_class, dnn = c("Purchase", "Predict"))
+```
+```{r}
+m7_acc <- ifelse(train_df$Purchase==train_pred_class, 1, 0)
+m7_acc <- round(mean(m7_acc), digits = 3)
+```
+```{r}
+1441+6124
+```
+
+```{r}
+chisquare_7 <- -2*(L_7 - L_6)
+critical_chi_7 <- qchisq(0.05,1,ncp=0,lower.tail=FALSE)
+predpr <- predict(model7, type=c("response"))
+roccurve <- roc(Purchase ~ predpr,data=train_df)
+plot(roccurve)
+auc(roccurve)
+
+m7_auc <- round(auc(roccurve), digits = 3)
+```
+```{r}
+
+AIC_list <-
+  c(AIC(model1),
+    AIC(model2),
+    AIC(model3),
+    AIC(model4),
+    AIC(model5),
+    AIC(model6),
+    AIC(model7))
+
+BIC_list <-
+  c(BIC(model1),
+    BIC(model2),
+    BIC(model3),
+    BIC(model4),
+    BIC(model5),
+    BIC(model6),
+    BIC(model7))
+
+AUC_list <-
+  c(m1_auc,
+    m2_auc,
+    m3_auc,
+    m4_auc,
+    m5_auc,
+    m6_auc,
+    m7_auc)
+
+acc_list <-   
+  c(m1_acc,
+    m2_acc,
+    m3_acc,
+    m4_acc,
+    m5_acc,
+    m6_acc,
+    m7_acc)
+
+chisq_list <-
+  c("NA",
+    round(chisquare_2,digits = 3),
+    round(chisquare_3,digits = 3),
+    round(chisquare_4,digits = 3),
+    round(chisquare_5,digits = 3),
+    round(chisquare_6, digits = 3),
+    round(chisquare_7, digits = 3))
+
+summary_table <- data.frame(
+  Model = c("Model 1", "Model 2", "Model 3", "Model 4", "Model 5", "Model 6","Model 7"),
+  AIC = AIC_list,
+  BIC = BIC_list,
+  Chi_Square = chisq_list,
+  AUC = AUC_list,
+  Accuracy = acc_list)
+
+kable(summary_table)
+```
+
+```{r}
+summary(model6)
+anova(model6)
+```
+
+```{r}
+train_df$AI_r <- train_df$AcidIndex*train_df$rated
+
+model6x <- glm(Purchase ~ rated + AcidIndex + AI_r, family = binomial, 
+    data = train_df)
+
+
+summary(model6x)
+anova(model6x)
+L_6x<-logLik(model6x)
+```
+
+```{r}
+train_prob <- model6x %>% predict(train_df, type = "response")
+train_pred_class <- ifelse(train_prob > 0.5, 1, 0)
+table(train_df$Purchase, train_pred_class, dnn = c("Purchase", "Predict"))
+```
+```{r}
+m6x_acc <- ifelse(train_df$Purchase==train_pred_class, 1, 0)
+m6x_acc <- round(mean(m6x_acc), digits = 3)
+```
+```{r}
+1441+6124
+```
+
+```{r}
+chisquare_6x <- -2*(L_6 - L_6x)
+critical_chi <- qchisq(0.05,1,ncp=0,lower.tail=FALSE)
+predpr <- predict(model6x, type=c("response"))
+roccurve <- roc(Purchase ~ predpr,data=train_df)
+plot(roccurve)
+auc(roccurve)
+
+m6x_auc <- round(auc(roccurve), digits = 3)
+```
+
+
+```{r}
+test_prob <- model6 %>% predict(test_df, type = "response")
+test_pred_class <- ifelse(test_prob > 0.5, 1, 0)
+table(test_df$Purchase, test_pred_class, dnn = c("Purchase", "Predict"))
+```
+```{r}
+m6_acc_t <- ifelse(test_df$Purchase==test_pred_class, 1, 0)
+m6_acc_t <- round(mean(m6_acc_t), digits = 3)
+m6_acc_t
+```
+
+```{r}
+(567+2655)
+```
+
+```{r}
+roccurve <- roc(Purchase ~ test_prob, data=test_df)
+plot(roccurve)
+auc(roccurve)
+```
+
+```{r}
+test_df$logit = log(test_prob/(1-test_prob))
+```
+```{r}
+plot(test_df$logit~test_df$AcidIndex)
+```
+```{r}
+boxTidwell(test_df$logit ~ test_df$AcidIndex)
+```
+
+
+```{r}
+# predictor variable names
+ 
+predictors <- colnames(test_df)
+
+# Bind the logit and tidying the data for plot
+test_df_2 <- test_df %>%
+  mutate(logit = log(test_prob/(1-test_prob))) %>%
+  gather(key = "predictors", value = "predictor.value", -logit)
+```
+
+```{r}
+
+ggplot(test_df_2, aes(logit, predictor.value))+
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  facet_wrap(~predictors, scales = "free_y")
+```
+```{r}
+
+```
+
+```{r}
+plot(model6, which = 4, id.n = 10)
+```
+
+
