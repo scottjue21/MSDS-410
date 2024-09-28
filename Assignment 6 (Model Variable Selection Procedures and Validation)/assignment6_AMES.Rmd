@@ -1,0 +1,971 @@
+---
+title: "assignment6_AMES"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(purrr)
+library(lessR)
+library(olsrr)
+
+options(scipen = 999)
+```
+
+```{r}
+mydata <- data.frame(ames_housing_data)
+
+mydata$TotalFloorSF <- mydata$FirstFlrSF + mydata$SecondFlrSF
+mydata$HouseAge <- mydata$YrSold - mydata$YearBuilt
+mydata$QualityIndex <- mydata$OverallQual * mydata$OverallCond
+mydata$logSalePrice <- log(mydata$SalePrice)
+mydata$price_sqft <- mydata$SalePrice/mydata$TotalFloorSF
+```
+
+```{r}
+subset_df <- mydata %>%
+  filter(
+    Zoning %in% c("RH", "RL", "RP", "RM", "FV"),
+    BldgType == "1Fam",
+    SaleCondition == "Normal",
+    GrLivArea < 4000,
+    Utilities == "AllPub",
+    GarageCars >= 1,
+    BedroomAbvGr > 0,
+    FullBath > 0,
+    TotalBsmtSF > 0,
+    KitchenAbvGr > 0,
+    TotRmsAbvGrd <= 9,
+    GrLivArea <= 2800,
+    TotalBsmtSF <= 2000
+  )
+```
+
+```{r}
+summary(subset_df)
+```
+
+```{r}
+myfunct2 <- function(x) {
+  c(
+    "NA Observations" = round(sum(is.na(x)))
+    #"Zero Obs" = round(sum(if_else(x == 0, 1, 0)))
+  )
+}
+
+na_df <- subset_df %>%
+  map( ~ myfunct2(.)) %>%
+  as.data.frame()
+
+row_names <- row.names(na_df)
+
+na_df <- cbind(na_df, row_names) %>%
+  gather(key = key, value = value,-row_names) %>%
+  spread(key = row_names, value = value)
+
+na_df %>%
+  mutate(Variable = key) %>%
+  filter(`NA Observations` > 0)
+```
+The *MasVnrArea* variable will be imputed with zeros since it's possible that houses do not have that particular feature, imputing a zero will effectively be the same as not having a masonry veneer area. The *LotFrontage* variable will be imputed with the **Median** value. This variable is the linear feet of street connected to the property so it doesn't make sense to impute to zero since properties need to be connected to the street.The NA observations for *BsmtFullBath* and *BsmtHalfBath* will also be imputed with zero since we assume that the missing value means that there is no full or half bath in the basement.
+
+```{r}
+subset_df <- subset_df %>%
+  mutate(
+    LotFrontage = replace_na(LotFrontage, median(LotFrontage, na.rm = TRUE)),
+    MasVnrArea = replace_na(MasVnrArea, 0)
+  )
+```
+
+```{r}
+par(mfrow = c(1, 3))
+hist(subset_df$price_sqft)
+boxplot(subset_df$price_sqft)
+plot(price_sqft~HouseAge, data = subset_df)
+```
+```{r}
+# identify extreme outliers by price_sqft
+quartiles <- quantile(subset_df$price_sqft, probs=c(.25, .75), na.rm = FALSE)
+IQR <- IQR(subset_df$price_sqft)
+ 
+ext_lower <- quartiles[1] - 3*IQR
+ext_upper <- quartiles[2] + 3*IQR 
+ 
+extr_out_price_sqft <- subset(subset_df, subset_df$price_sqft < ext_lower | subset_df$price_sqft > ext_upper)
+extr_out_price_sqft 
+```
+
+```{r}
+ggplot(data = subset_df, aes(x = HouseStyle, y = SalePrice, group = HouseStyle)) + geom_boxplot(fill = "orange2") +
+  ggtitle("Boxplots of SalePrice by HouseStyle") + theme(plot.title = element_text(size = 10, hjust = 0.5)) + 
+  theme(axis.text = element_text(angle = 90, vjust=0.5, hjust=1))
+```
+```{r}
+ggplot(data = subset_df, aes(x = GrLivArea, y = SalePrice, color = HouseStyle)) + geom_point() +
+  ggtitle("Boxplots of SalePrice by HouseStyle") + theme(plot.title = element_text(size = 10, hjust = 0.5)) + 
+  theme(axis.text = element_text(angle = 90, vjust=0.5, hjust=1))
+```
+```{r}
+ saleprice_style <- subset_df %>%                               # Summary by group using dplyr
+   group_by(HouseStyle) %>% 
+   summarize(n = n(),
+            Mean = mean(SalePrice),
+            Std_Dev = sd(SalePrice),
+            Min = min(SalePrice),
+            Q1 = quantile(SalePrice, 0.25),
+            Median = median(SalePrice),
+            Q3 = quantile(SalePrice, 0.75),
+            Max = max(SalePrice))
+
+knitr::kable(saleprice_style)
+```
+```{r}
+subset_df_style <- subset_df %>%
+  filter(HouseStyle != '2.5Fin')
+
+summary(lm(SalePrice ~ HouseStyle, data = subset_df_style))
+```
+
+```{r}
+ggplot(data = subset_df, aes(x = Neighborhood, y = SalePrice, group = Neighborhood)) + geom_boxplot(fill = "orange2") +
+  ggtitle("Boxplots of SalePrice by NeighborHood") + theme(plot.title = element_text(size = 10, hjust = 0.5)) + 
+  theme(axis.text = element_text(angle = 90, vjust=0.5, hjust=1))
+```
+
+
+```{r}
+ggplot(data = subset_df, aes(x = GrLivArea, y = SalePrice, color = Neighborhood)) + geom_point() +
+  ggtitle("Scatterplot of SalePrice vs GrLivArea by Neighborhood") + theme(plot.title = element_text(size = 10, hjust = 0.5)) + 
+  theme(axis.text = element_text(angle = 90, vjust=0.5, hjust=1))
+```
+
+```{r}
+ saleprice_nbhd <- subset_df %>%                               # Summary by group using dplyr
+   group_by(Neighborhood) %>% 
+   summarize(n = n(),
+            Mean = mean(SalePrice),
+            Std_Dev = sd(SalePrice),
+            Min = min(SalePrice),
+            Q1 = quantile(SalePrice, 0.25),
+            Median = median(SalePrice),
+            Q3 = quantile(SalePrice, 0.75),
+            Max = max(SalePrice)) %>%
+  arrange(Mean)
+
+knitr::kable(saleprice_nbhd)
+```
+
+If we look at the summary of the regression model SalePrice ~ Neighborhood, we can review the coefficients as the mean difference from *Blmngtn*. There are several neighborhoods with very big mean differences. The adjusted R-squared also shows us that Neighborhood accounts for a high amount of variance in SalePrice.
+```{r}
+subset_df <- subset_df %>%
+  filter(Neighborhood != 'Blmngtn')
+
+low <- list('IDOTRR', 'OldTown', 'SWISU', 'BrkSid', 'Edwards', 'Sawyer', 'NAmes')
+mid <- list('Mitchel', 'Gilbert', 'NWAmes', 'SawyerW', 'Crawfor', 'CollgCr', 'ClearCr')
+high <- list('Timber', 'Veenker', 'Somerst', 'NoRidge', 'NridgHt', 'StoneBr')
+
+subset_df$Neighborhood_type <- ifelse(subset_df$Neighborhood %in% low, 'Low', ifelse(subset_df$Neighborhood %in% mid, 'Mid', 'High'))
+
+head(subset_df)
+```
+```{r}
+ggplot(data = subset_df, aes(x = GrLivArea, y = SalePrice, color = Neighborhood_type)) + geom_point() +
+  ggtitle("Scatterplot of SalePrice vs GrLivArea by Neighborhood Type") + theme(plot.title = element_text(size = 10, hjust = 0.5)) + 
+  theme(axis.text = element_text(angle = 90, vjust=0.5, hjust=1))
+```
+```{r}
+ saleprice_nbhd2 <- subset_df %>%                               # Summary by group using dplyr
+   group_by(Neighborhood_type) %>% 
+   summarize(n = n(),
+            Mean = mean(SalePrice),
+            Std_Dev = sd(SalePrice),
+            Min = min(SalePrice),
+            Q1 = quantile(SalePrice, 0.25),
+            Median = median(SalePrice),
+            Q3 = quantile(SalePrice, 0.75),
+            Max = max(SalePrice)) %>%
+  arrange(Mean)
+
+knitr::kable(saleprice_nbhd2)
+```
+```{r}
+ saleprice_nbhd3 <- subset_df %>%                               # Summary by group using dplyr
+   group_by(Neighborhood_type) %>% 
+   summarize(n = n(),
+            Mean = mean(logSalePrice),
+            Std_Dev = sd(logSalePrice),
+            Min = min(logSalePrice),
+            Q1 = quantile(logSalePrice, 0.25),
+            Median = median(logSalePrice),
+            Q3 = quantile(logSalePrice, 0.75),
+            Max = max(logSalePrice)) %>%
+  arrange(Mean)
+
+knitr::kable(saleprice_nbhd3)
+```
+
+```{r}
+summary(lm(SalePrice ~ Neighborhood_type, data = subset_df))
+summary(lm(logSalePrice ~ Neighborhood_type, data = subset_df))
+```
+```{r}
+subset_df$SubClass <- factor(subset_df$SubClass)
+
+ggplot(data = subset_df, aes(x = SubClass, y = SalePrice, group = SubClass)) + geom_boxplot(fill = "orange2") +
+  ggtitle("Boxplots of SalePrice by NeighborHood") + theme(plot.title = element_text(size = 10, hjust = 0.5)) + 
+  theme(axis.text = element_text(angle = 90, vjust=0.5, hjust=1))
+```
+
+
+```{r}
+ggplot(data = subset_df, aes(x = GrLivArea, y = SalePrice, color = SubClass)) + geom_point() +
+  ggtitle("Scatterplots of SalePrice vs GrLivArea by SubClass") + theme(plot.title = element_text(size = 10, hjust = 0.5)) + 
+  theme(axis.text = element_text(angle = 90, vjust=0.5, hjust=1))
+```
+
+```{r}
+subset_df %>%                               # Summary by group using dplyr
+   group_by(SubClass) %>% 
+   summarize(n = n(),
+            Mean = mean(SalePrice),
+            Std_Dev = sd(SalePrice),
+            Min = min(SalePrice),
+            Q1 = quantile(SalePrice, 0.25),
+            Median = median(SalePrice),
+            Q3 = quantile(SalePrice, 0.75),
+            Max = max(SalePrice))
+```
+
+```{r}
+subset_df_subclass <- subset_df %>%
+  filter(SubClass != 160)
+
+summary(lm(logSalePrice ~ SubClass, data = subset_df_subclass))
+```
+
+```{r}
+subset(subset_df, subset_df$price_sqft < ext_lower | subset_df$price_sqft > ext_upper)
+```
+```{r}
+subset_df <- subset_df %>%
+  filter(SID != 1064,
+         Neighborhood != 'Blmngtn')
+```
+
+```{r}
+nrow(subset(subset_df, subset_df$price_sqft < ext_lower | subset_df$price_sqft > ext_upper))
+```
+```{r}
+par(mfrow = c(2,2))
+hist(subset_df$SalePrice)
+hist(subset_df$logSalePrice)
+```
+
+
+```{r}
+# identify extreme outliers by sale price
+quartiles <- quantile(subset_df$SalePrice, probs=c(.25, .75), na.rm = FALSE)
+IQR <- IQR(subset_df$SalePrice)
+ 
+ext_lower <- quartiles[1] - 3*IQR
+ext_upper <- quartiles[2] + 3*IQR 
+ 
+extr_out_SP <- subset(subset_df, subset_df$SalePrice < ext_lower | subset_df$SalePrice > ext_upper)
+extr_out_SP 
+
+# identify extreme outliers by sale price
+quartiles_lsp <- quantile(subset_df$logSalePrice, probs=c(.25, .75), na.rm = FALSE)
+IQR_lsp <- IQR(subset_df$logSalePrice)
+ 
+ext_lower_lsp <- quartiles_lsp[1] - 3*IQR
+ext_upper_lsp <- quartiles_lsp[2] + 3*IQR 
+ 
+extr_out_lsp <- subset(subset_df, subset_df$logSalePrice < ext_lower | subset_df$logSalePrice > ext_upper)
+extr_out_lsp 
+```
+
+```{r}
+# Add dummy coded variables for neighborhood
+dummy_nbrhd <- model.matrix(~ Neighborhood_type - 1, data = subset_df)
+dummy_nbrhd <- data.frame(dummy_nbrhd)
+subset_df <- bind_cols(subset_df, dummy_nbrhd)
+
+head(subset_df)
+```
+
+```{r}
+model_df <- subset_df
+```
+
+TASK 1 The Predictive Modeling Framework
+
+```{r}
+# Set the seed on the random number generator so you get the same split every time that you run the code.
+set.seed(123)
+model_df$u <- runif(n=dim(model_df)[1],min=0,max=1);
+
+# Define these two variables for later use;
+model_df$QualityIndex <- model_df$OverallQual*model_df$OverallCond;
+model_df$TotalSqftCalc <- model_df$BsmtFinSF1+model_df$BsmtFinSF2+model_df$GrLivArea;
+
+# Create train/test split;
+train.df <- subset(model_df, u<0.70);
+test.df  <- subset(model_df, u>=0.70);
+
+# Check your data split. The sum of the parts should equal the whole.
+# Do your totals add up?
+dim(model_df)[1]
+dim(train.df)[1]
+dim(test.df)[1]
+dim(train.df)[1]+dim(test.df)[1]
+dim(train.df)[1]/dim(model_df)[1]
+dim(test.df)[1]/dim(model_df)[1]
+```
+
+TASK 2	Model Identification by Automated Variable Selection
+
+```{r}
+train.df.num <- train.df %>% dplyr::select(where(is.numeric))
+```
+
+```{r}
+drop.list <- c('SID','PID','YearBuilt','YearRemodel','BsmtFinSF1','BsmtFinSF2',
+               'u','BsmtFullBath','BsmtHalfBath','FullBath','HalfBath','OverallQual','OverallCond','PoolArea','GrLivArea',
+               'SalePrice', 'price_sqft', 'YrSold', 'MoSold', 'MiscVal', 'GarageYrBlt', 'FirstFlrSF', 'SecondFlrSF',
+               'WoodDeckSF', 'OpenPorchSF', 'EnclosedPorch', 'ScreenPorch', 'ThreeSsnPorch', 'MasVnrArea', 'Fireplaces')
+#'GarageCars','TotalFloorSF', 'TotalBsmtSF'
+
+train.clean <-train.df.num[,!(names(train.df.num) %in% drop.list)];
+
+summary(train.clean)
+
+```
+
+```{r}
+# Define the upper model as the FULL model
+upper.lm <- lm(logSalePrice ~ .,data=train.clean);
+summary(upper.lm)
+
+# Define the lower model as the Intercept model
+lower.lm <- lm(logSalePrice ~ 1,data=train.clean);
+
+# Need a SLR to initialize stepwise selection
+sqft.lm <- lm(logSalePrice ~ TotalSqftCalc,data=train.clean);
+summary(sqft.lm)
+
+```
+```{r}
+# Note: There is only one function for classical model selection in R - stepAIC();
+# stepAIC() is part of the MASS library.
+# The MASS library comes with the BASE R distribution, but you still need to load it;
+library(MASS)
+
+# Call stepAIC() for variable selection
+forward.lm <- stepAIC(object=lower.lm,scope=list(upper=formula(upper.lm),lower=~1),
+direction=c('forward'));
+summary(forward.lm)
+```
+
+
+```{r}
+
+backward.lm <- stepAIC(object=upper.lm,direction=c('backward'));
+summary(backward.lm)
+
+```
+
+```{r}
+stepwise.lm <- stepAIC(object=sqft.lm,scope=list(upper=formula(upper.lm),lower=~1),
+direction=c('both'));
+summary(stepwise.lm)
+```
+```{r}
+junk.lm <- lm(logSalePrice ~ QualityIndex + OverallQual + OverallCond + GrLivArea + TotalSqftCalc, data=train.df)
+
+summary(junk.lm)
+
+```
+
+
+
+```{r}
+# Compute the VIF values
+library(car)
+sort(vif(forward.lm),decreasing=TRUE)
+```
+
+```{r}
+sort(vif(backward.lm),decreasing=TRUE)
+```
+
+```{r}
+sort(vif(stepwise.lm),decreasing=TRUE)
+```
+```{r}
+sort(vif(junk.lm),decreasing=TRUE) 
+```
+```{r}
+drop.list <- c('SID','PID','YearBuilt','YearRemodel','BsmtFinSF1','BsmtFinSF2',
+               'u','BsmtFullBath','BsmtHalfBath','FullBath','HalfBath','OverallQual','OverallCond','PoolArea','GrLivArea',
+               'SalePrice', 'price_sqft', 'YrSold', 'MoSold', 'MiscVal', 'GarageYrBlt', 'FirstFlrSF', 'SecondFlrSF',
+               'WoodDeckSF', 'OpenPorchSF', 'EnclosedPorch', 'ScreenPorch', 'ThreeSsnPorch', 'MasVnrArea', 'Fireplaces',
+               'GarageCars','TotalFloorSF', 'TotalBsmtSF')
+
+train.clean <-train.df.num[,!(names(train.df.num) %in% drop.list)];
+
+summary(train.clean)
+
+```
+
+```{r}
+# Define the upper model as the FULL model
+upper.lm <- lm(logSalePrice ~ .,data=train.clean);
+summary(upper.lm)
+
+# Define the lower model as the Intercept model
+lower.lm <- lm(logSalePrice ~ 1,data=train.clean);
+
+# Need a SLR to initialize stepwise selection
+sqft.lm <- lm(logSalePrice ~ TotalSqftCalc,data=train.clean);
+summary(sqft.lm)
+
+```
+
+```{r}
+# Call stepAIC() for variable selection
+forward.lm <- stepAIC(object=lower.lm,scope=list(upper=formula(upper.lm),lower=~1),
+direction=c('forward'));
+summary(forward.lm)
+```
+
+
+```{r}
+
+backward.lm <- stepAIC(object=upper.lm,direction=c('backward'));
+summary(backward.lm)
+
+```
+
+```{r}
+stepwise.lm <- stepAIC(object=sqft.lm,scope=list(upper=formula(upper.lm),lower=~1),
+direction=c('both'));
+summary(stepwise.lm)
+```
+```{r}
+junk.lm <- lm(logSalePrice ~ QualityIndex + GrLivArea + TotalSqftCalc, data=train.df)
+
+summary(junk.lm)
+
+```
+
+
+
+```{r}
+# Compute the VIF values
+sort(vif(forward.lm),decreasing=TRUE)
+```
+
+```{r}
+sort(vif(backward.lm),decreasing=TRUE)
+```
+
+```{r}
+sort(vif(stepwise.lm),decreasing=TRUE)
+```
+```{r}
+sort(vif(junk.lm),decreasing=TRUE) 
+```
+
+```{r}
+
+forward_rmse <- sqrt(mean(forward.lm$residuals ^ 2))
+backwards_rmse <- sqrt(mean(backward.lm$residuals ^ 2))
+stepwise_rmse <- sqrt(mean(stepwise.lm$residuals ^2))
+junk_rsme <- sqrt(mean(junk.lm$residuals ^2))
+
+forward_summary <- summary(forward.lm)
+backwards_summary <- summary(backward.lm)
+stepwise_summary <- summary(stepwise.lm)
+junk_summary <- summary(junk.lm)
+
+
+Adj_R_Squared <-
+  c(
+    forward_summary$adj.r.squared,
+    backwards_summary$adj.r.squared,
+    stepwise_summary$adj.r.squared,
+    junk_summary$adj.r.squared
+  )
+AIC_list <-
+  c(AIC(forward.lm),
+    AIC(backward.lm),
+    AIC(stepwise.lm),
+    AIC(junk.lm))
+BIC_list <-
+  c(BIC(forward.lm),
+    BIC(backward.lm),
+    BIC(stepwise.lm),
+    BIC(junk.lm))
+MSE_list <-
+  c(
+    mean(forward.lm$residuals ^ 2),
+    mean(backward.lm$residuals ^ 2),
+    mean(stepwise.lm$residuals ^ 2),
+    mean(junk.lm$residuals ^ 2)
+  )
+RMSE_list <-
+  c(forward_rmse , backwards_rmse , stepwise_rmse, junk_rsme)
+
+MAE_list <-
+  c(mean(abs(forward.lm$residuals)), mean(abs(backward.lm$residuals)), mean(abs(stepwise.lm$residuals)), mean(abs(junk.lm$residuals)))
+
+knitr::kable(data.frame(
+  Model = c("Forward", "Backward", "Stepwise", "Junk"),
+  Adj_R_Squared = Adj_R_Squared,
+  AIC = AIC_list,
+  BIC = BIC_list,
+  MSE = MSE_list,
+  RMSE = RMSE_list,
+  MAE = MAE_list
+))
+```
+
+Task 3	Predictive Accuracy
+
+```{r}
+test_forward <- predict(forward.lm, newdata = test.df)
+test_backward <- predict(backward.lm, newdata = test.df)
+test_step <- predict(stepwise.lm, newdata = test.df)
+test_junk <- predict(junk.lm, newdata = test.df)
+
+test_f_mse <- mean((test.df$logSalePrice - test_forward) ^ 2)
+test_b_mse <- mean((test.df$logSalePrice - test_backward) ^ 2)
+test_s_mse <- mean((test.df$logSalePrice - test_step) ^ 2)
+test_j_mse <- mean((test.df$logSalePrice - test_junk) ^ 2)
+test_f_mae <- mean(abs(test.df$logSalePrice - test_forward))
+test_b_mae <- mean(abs(test.df$logSalePrice - test_backward))
+test_s_mae <- mean(abs(test.df$logSalePrice - test_step))
+test_j_mae <- mean(abs(test.df$logSalePrice - test_junk))
+
+knitr::kable(data.frame(
+  Model = c("Forward", "Backward", "Stepwise", "Junk"),
+  Test_MSE = c(test_f_mse, test_b_mse, test_s_mse, test_j_mse),
+  Test_MAE = c(test_f_mae, test_b_mae, test_s_mae, test_j_mae)
+))
+```
+
+Task 4 Operational Validation
+
+```{r}
+# Training Data
+# Abs Pct Error
+forward_pct <- abs(forward.lm$residuals)/train.clean$logSalePrice;
+
+# Assign Prediction Grades;
+forward_PredictionGrade <- ifelse(forward_pct<=0.10,'Grade 1: [0.0.10]',
+					ifelse(forward_pct<=0.15,'Grade 2: (0.10,0.15]',
+						ifelse(forward_pct<=0.25,'Grade 3: (0.15,0.25]',
+						'Grade 4: (0.25+]')
+					)					
+				)
+
+forward_trainTable <- table(forward_PredictionGrade)
+forward_trainTable/sum(forward_trainTable)
+
+
+# Test Data
+# Abs Pct Error
+forward_testPCT <- abs(test.df$logSalePrice-test_forward)/test.df$logSalePrice
+backward_testPCT <- abs(test.df$logSalePrice-test_backward)/test.df$logSalePrice
+stepwise_testPCT <- abs(test.df$logSalePrice-test_step)/test.df$logSalePrice
+junk_testPCT <- abs(test.df$logSalePrice-test_junk)/test.df$logSalePrice
+
+
+# Assign Prediction Grades;
+forward_testPredictionGrade <- ifelse(forward_testPCT<=0.10,'Grade 1: [0.0.10]',
+					ifelse(forward_testPCT<=0.15,'Grade 2: (0.10,0.15]',
+						ifelse(forward_testPCT<=0.25,'Grade 3: (0.15,0.25]',
+						'Grade 4: (0.25+]')
+					)					
+				)
+
+forward_testTable <-table(forward_testPredictionGrade)
+forward_testTable/sum(forward_testTable)
+
+```
+```{r}
+#Training Data
+
+backward_pct <- abs(backward.lm$residuals)/train.clean$logSalePrice;
+
+# Assign Prediction Grades;
+backward_PredictionGrade <- ifelse(backward_pct<=0.10,'Grade 1: [0.0.10]',
+					ifelse(backward_pct<=0.15,'Grade 2: (0.10,0.15]',
+						ifelse(backward_pct<=0.25,'Grade 3: (0.15,0.25]',
+						'Grade 4: (0.25+]')
+					)					
+				)
+
+backward_trainTable <- table(backward_PredictionGrade)
+backward_trainTable/sum(backward_trainTable)
+
+
+# Test Data
+
+# Assign Prediction Grades;
+backward_testPredictionGrade <- ifelse(backward_testPCT<=0.10,'Grade 1: [0.0.10]',
+					ifelse(backward_testPCT<=0.15,'Grade 2: (0.10,0.15]',
+						ifelse(backward_testPCT<=0.25,'Grade 3: (0.15,0.25]',
+						'Grade 4: (0.25+]')
+					)					
+				)
+
+backward_testTable <-table(backward_testPredictionGrade)
+backward_testTable/sum(backward_testTable)
+```
+
+```{r}
+#Training Data
+
+step_pct <- abs(stepwise.lm$residuals)/train.clean$logSalePrice;
+
+# Assign Prediction Grades;
+step_PredictionGrade <- ifelse(step_pct<=0.10,'Grade 1: [0.0.10]',
+					ifelse(step_pct<=0.15,'Grade 2: (0.10,0.15]',
+						ifelse(step_pct<=0.25,'Grade 3: (0.15,0.25]',
+						'Grade 4: (0.25+]')
+					)					
+				)
+
+step_trainTable <- table(step_PredictionGrade)
+step_trainTable/sum(step_trainTable)
+
+
+# Test Data
+
+# Assign Prediction Grades;
+step_testPredictionGrade <- ifelse(stepwise_testPCT<=0.10,'Grade 1: [0.0.10]',
+					ifelse(stepwise_testPCT<=0.15,'Grade 2: (0.10,0.15]',
+						ifelse(stepwise_testPCT<=0.25,'Grade 3: (0.15,0.25]',
+						'Grade 4: (0.25+]')
+					)					
+				)
+
+step_testTable <-table(step_testPredictionGrade)
+step_testTable/sum(step_testTable)
+```
+```{r}
+#Training Data
+
+junk_pct <- abs(junk.lm$residuals)/train.clean$logSalePrice;
+
+# Assign Prediction Grades;
+junk_PredictionGrade <- ifelse(junk_pct<=0.10,'Grade 1: [0.0.10]',
+					ifelse(junk_pct<=0.15,'Grade 2: (0.10,0.15]',
+						ifelse(junk_pct<=0.25,'Grade 3: (0.15,0.25]',
+						'Grade 4: (0.25+]')
+					)					
+				)
+
+junk_trainTable <- table(junk_PredictionGrade)
+junk_trainTable/sum(junk_trainTable)
+
+
+# Test Data
+
+# Assign Prediction Grades;
+junk_testPredictionGrade <- ifelse(junk_testPCT<=0.10,'Grade 1: [0.0.10]',
+					ifelse(junk_testPCT<=0.15,'Grade 2: (0.10,0.15]',
+						ifelse(junk_testPCT<=0.25,'Grade 3: (0.15,0.25]',
+						'Grade 4: (0.25+]')
+					)					
+				)
+
+junk_testTable <-table(junk_testPredictionGrade)
+junk_testTable/sum(junk_testTable)
+```
+TASK 5
+
+```{r}
+summary(forward.lm)
+```
+
+```{r}
+cor(train.clean$BedroomAbvGr, train.clean$TotRmsAbvGrd)
+cor(train.clean$KitchenAbvGr, train.clean$TotRmsAbvGrd)
+cor(train.clean$KitchenAbvGr, train.clean$BedroomAbvGr)
+cor(train.clean$KitchenAbvGr, train.clean$TotalSqftCalc)
+```
+```{r}
+# remove collinear variables and variables with negative coefficients that don't make logical sense or with coefficients near 0
+
+# remove BedroomAboveGr, LotArea, LowQualFinSF, KitchenAbvGr
+
+final_model1 <-
+  lm(formula = logSalePrice ~ TotalSqftCalc + BsmtUnfSF + HouseAge +
+      QualityIndex + GarageArea + TotRmsAbvGrd  + LotFrontage + 
+       Neighborhood_typeLow + Neighborhood_typeHigh,
+    data = train.clean)
+
+summary(final_model1)
+
+```
+```{r}
+# drop TotRmsABvGrd
+
+final_model2 <-
+ lm(formula = logSalePrice ~ TotalSqftCalc + BsmtUnfSF + HouseAge +
+      QualityIndex + GarageArea  + LotFrontage + 
+       Neighborhood_typeLow + Neighborhood_typeHigh,
+    data = train.clean)
+
+summary(final_model2)
+```
+```{r}
+# drop lotfrontage
+final_model3 <-
+ lm(formula = logSalePrice ~ TotalSqftCalc + BsmtUnfSF + HouseAge +
+      QualityIndex + GarageArea  + 
+       Neighborhood_typeLow + Neighborhood_typeHigh,
+    data = train.clean)
+
+summary(final_model3)
+```
+```{r}
+# drop garagearea
+final_model4 <-
+ lm(formula = logSalePrice ~ TotalSqftCalc + BsmtUnfSF + HouseAge +
+      QualityIndex +
+       Neighborhood_typeLow + Neighborhood_typeHigh,
+    data = train.clean)
+
+summary(final_model4)
+```
+
+```{r}
+# drop bsmt unf
+final_model5 <-
+lm(formula = logSalePrice ~ TotalSqftCalc + HouseAge + 
+    QualityIndex + Neighborhood_typeLow + Neighborhood_typeHigh, 
+    data = train.clean)
+
+summary(final_model5)
+```
+```{r}
+# drop house age
+final_model6 <-
+lm(formula = logSalePrice ~ TotalSqftCalc +
+    QualityIndex + Neighborhood_typeLow + Neighborhood_typeHigh, 
+    data = train.clean)
+
+summary(final_model6)
+```
+
+```{r}
+#drop quality index
+final_model7 <-
+lm(formula = logSalePrice ~ TotalSqftCalc + Neighborhood_typeLow + Neighborhood_typeHigh, 
+    data = train.clean)
+
+summary(final_model7)
+```
+```{r}
+#drop nbhdtype
+final_model8 <-
+lm(formula = logSalePrice ~ TotalSqftCalc, 
+    data = train.clean)
+
+summary(final_model8)
+```
+
+```{r}
+summary(final_model4)
+```
+
+```{r}
+# test interaction of Total sqft and nbhd type
+train.clean$Totsqft_nbhdLow <- train.clean$TotalSqftCalc*train.clean$Neighborhood_typeLow
+train.clean$Totsqft_nbhdHigh <- train.clean$TotalSqftCalc*train.clean$Neighborhood_typeHigh
+
+final_model4x <- lm(formula = logSalePrice ~ TotalSqftCalc + BsmtUnfSF + HouseAge + 
+    QualityIndex + Neighborhood_typeLow + Neighborhood_typeHigh + Totsqft_nbhdLow + Totsqft_nbhdHigh, 
+    data = train.clean)
+
+summary(final_model4x)
+```
+```{r}
+anova(final_model4x, final_model4, test='F')
+```
+
+critical F value is 3.003, computed F value is higher
+
+```{r}
+#test interaction between quality index and nbhd type
+train.clean$qualind_nbhdLow <- train.clean$QualityIndex*train.clean$Neighborhood_typeLow
+train.clean$qualind_nbhdHigh <- train.clean$QualityIndex*train.clean$Neighborhood_typeHigh
+
+final_model4x2 <- lm(formula = logSalePrice ~ TotalSqftCalc + BsmtUnfSF + HouseAge + 
+    QualityIndex + Neighborhood_typeLow + Neighborhood_typeHigh +
+      qualind_nbhdLow + qualind_nbhdHigh, 
+    data = train.clean)
+
+summary(final_model4x2)
+```
+```{r}
+anova(final_model4x2, final_model4, test='F')
+```
+```{r}
+# test interaction between house age and nbhd type
+train.clean$age_nbhdLow <- train.clean$HouseAge*train.clean$Neighborhood_typeLow
+train.clean$age_nbhdHigh <- train.clean$HouseAge*train.clean$Neighborhood_typeHigh
+
+final_model4x3 <- lm(formula = logSalePrice ~ TotalSqftCalc + BsmtUnfSF + HouseAge + 
+    QualityIndex + Neighborhood_typeLow + Neighborhood_typeHigh +
+      age_nbhdLow + age_nbhdHigh, 
+    data = train.clean)
+
+summary(final_model4x3)
+```
+```{r}
+anova(final_model4x3, final_model4, test='F')
+```
+
+```{r}
+summary(final_model4)
+```
+
+```{r}
+anova(final_model4)
+```
+
+```{r}
+train.df$y_hat <- predict(final_model4)
+train.df$residual <- train.df$logSalePrice - train.df$y_hat
+
+plot(final_model4)
+```
+
+```{r}
+# Omnibus F-test calculation
+omnibus_f <- function(model, alpha = 0.95) {
+  # Calculate F-statistic
+  anova_obj <- anova(model)
+  ssy <- sum(anova_obj$`Sum Sq`)
+  sse_index <- length(anova_obj$`Sum Sq`)
+  sse <- anova_obj$`Sum Sq`[sse_index]
+  k <- sum(anova_obj$Df[-sse_index])
+  n <- sum(anova_obj$Df) + 1
+  num <- (ssy - sse) / k
+  denom <- sse / (n - k - 1)
+  f <- round(num / denom, digits = 4)
+  
+  # Calculate critical F Value
+  crit_f <- round(qf(alpha, k, (n - k - 1)), digits = 4)
+  
+  # Output: Determine if reject the null
+  if (f > crit_f) {
+    print(paste("F-statistic of", f, "is greater than the critical value of", crit_f))
+    print("We can REJECT the null hypothesis")
+  } else {
+    print(paste("F-statistic of", f, "is less than the critical value of", crit_f))
+    print("We FAIL TO REJECT the null hypothesis")
+  }
+}
+```
+
+```{r}
+omnibus_f(final_model4)
+```
+
+```{r}
+# standardized residuals and leverage
+train.df$leverage1 <- hatvalues(final_model4)
+
+train.df$std_resid <- rstandard(final_model4)
+
+
+# create histogram and scatterplot of standardized residuals
+par(mfrow = c(2, 2))
+hist(train.df$std_resid)
+plot(train.df$y_hat~train.df$std_resid)
+```
+```{r}
+ols_plot_cooksd_chart(final_model4)
+```
+```{r}
+cooks_dist <- cooks.distance(final_model4)
+potential_outliers <- cooks_dist[cooks_dist > .003]
+length(potential_outliers)
+```
+
+```{r}
+train.df$y_hat_bt <- exp(train.df$y_hat)
+train.df$residual_bt <- train.df$SalePrice - train.df$y_hat_bt
+```
+```{r}
+fm_mae_bt <- mean(abs(train.df$SalePrice - train.df$y_hat_bt))
+
+fm_mae_bt
+```
+
+```{r}
+plot(train.df$SalePrice~train.df$y_hat_bt)
+```
+
+```{r}
+# Training Data
+# Abs Pct Error
+forward_pct <- abs(train.df$residual_bt)/train.df$SalePrice;
+
+# Assign Prediction Grades;
+forward_PredictionGrade_bt <- ifelse(forward_pct<=0.10,'Grade 1: [0.0.10]',
+					ifelse(forward_pct<=0.15,'Grade 2: (0.10,0.15]',
+						ifelse(forward_pct<=0.25,'Grade 3: (0.15,0.25]',
+						'Grade 4: (0.25+]')
+					)					
+				)
+
+forward_trainTable <- table(forward_PredictionGrade_bt)
+forward_trainTable/sum(forward_trainTable)
+
+
+# Test Data
+test.df$age_nbhdLow <- test.df$HouseAge*test.df$Neighborhood_typeLow
+test.df$age_nbhdHigh <- test.df$HouseAge*test.df$Neighborhood_typeHigh
+test_forward_fm <- predict(final_model4, newdata = test.df)
+test_forward_fm_bt <- exp(test_forward_fm)
+# Abs Pct Error
+forward_testPCT <- abs(test.df$SalePrice-test_forward_fm_bt)/test.df$SalePrice
+# backward_testPCT <- abs(test.df$logSalePrice-test_backward)/test.df$logSalePrice
+# stepwise_testPCT <- abs(test.df$logSalePrice-test_step)/test.df$logSalePrice
+# junk_testPCT <- abs(test.df$logSalePrice-test_junk)/test.df$logSalePrice
+
+
+# Assign Prediction Grades;
+forward_testPredictionGrade_bt <- ifelse(forward_testPCT<=0.10,'Grade 1: [0.0.10]',
+					ifelse(forward_testPCT<=0.15,'Grade 2: (0.10,0.15]',
+						ifelse(forward_testPCT<=0.25,'Grade 3: (0.15,0.25]',
+						'Grade 4: (0.25+]')
+					)					
+				)
+
+forward_testTable <-table(forward_testPredictionGrade_bt)
+forward_testTable/sum(forward_testTable)
+```
+```{r}
+test.df$yhat_bt <- exp(predict(final_model4, newdata = test.df))
+
+plot(test.df$SalePrice~test.df$yhat_bt)
+```
+
+
+
+
