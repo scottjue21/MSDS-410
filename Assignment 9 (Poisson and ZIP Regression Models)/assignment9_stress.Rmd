@@ -1,0 +1,449 @@
+---
+title: "assignment9_stress"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#install.packages('pscl')
+library(readr)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(purrr)
+library(lessR)
+library(pscl)
+library(knitr)
+library(MASS)
+library(pROC)
+
+options(scipen = 999)
+```
+
+```{r}
+df <- data.frame(STRESS)
+```
+```{r}
+str(df)
+head(df)
+```
+```{r}
+summary(df)
+```
+
+```{r fig.align="center", fig.width=8, fig.height=4}
+par(mfrow = c(1, 2))
+# Histogram
+hist(df$STRESS, xlab = "Stress", main = "Histogram of Stress", col = "blue")
+# Q-Q Plot
+qqnorm(df$STRESS, main = "Normal Q-Q Plot (Stress)", pch = 19, col = "blue")
+```
+
+STRESS is definitely not normally distributed as evidenced by the histogram and Q-Q plot. The mean of STRESS is **`r round(mean(df$STRESS), digits = 3)`**, and the variance is **`r round(var(df$STRESS), digits = 3)`**. If we remove the zero values, the mean is **`r round(mean(df$STRESS[df$STRESS > 0]), digits = 3)`** and the variance is **`r round(var(df$STRESS[df$STRESS > 0]), digits = 3)`**. These values are very close indicating that either a Poisson probability distribution or a negative binomial distribution is a likely choice.
+
+```{r}
+round(mean(df$STRESS), digits = 3)
+round(var(df$STRESS), digits = 3)
+
+#If we remove the zero values, the mean is 
+round(mean(df$STRESS[df$STRESS > 0]), digits = 3)
+#the variance is 
+round(var(df$STRESS[df$STRESS > 0]), digits = 3)
+```
+# 2. OLS Regression on STRESS  
+Fit an OLS regression model to predict STRESS (Y) using COHES, ESTEEM, GRADES, SATTACH as explanatory variables (X). Obtain the typical diagnostic information and graphs.Discuss how well this model fits.Obtain predicted values (Y_hat) and plot them in a histogram.What issues do you see?  
+
+Below we can see the summary output of the OLS model.
+
+```{r}
+ols1 <- lm(STRESS ~ COHES + ESTEEM + GRADES + SATTACH, data = df)
+summary(ols1)
+anova(ols1)
+```
+
+The linear model does a poor job of explaining the variance in STRESS. The adjusted R-squared is 0.07751, indicating that the independent variables only account for 7.75% of the variance in STRESS. A couple possible reasons are that the STRESS variable is not normally distributed and the relationships between the independent variables and STRESS are not linear. Each coefficient is negative which means that as the value of ESTEEM increases by a count of 1 (the adolescent's self-esteem), the STRESS level decreases by 0.04129. This is not a very plausible value to interpret as the values of STRESS must be non-negative integer values.
+
+```{r fig.align="center", fig.width=8, fig.height=8}
+par(mfrow=c(2,2))
+plot(ols1)
+```
+
+In reviewing the diagnostic graphs of the OLS model, we can clearly see a pattern in the residuals vs fitted (top left) that indicates we are violating our assumption of homogeneity of variance. There also appear to be some values with high leverage.
+
+```{r fig.align="center", fig.width=8, fig.height=4}
+hist(ols1$fitted.values, main = "Histogram of Fitted Values", xlab = "Fitted Values", col = "blue")
+```
+
+The main thing that sticks out in the histogram of the fitted values is that they are relatively close to a normal distribution even though STRESS is not normally distributed. The mode of STRESS is 0 which is a very small component of the predicted values.
+
+# 3. OLS Regression on ln(STRESS)  
+Create a transformed variable on Y that is LN(Y). Fit an OLS regression model to predict LN(Y) using COHES, ESTEEM, GRADES, SATTACH as explanatory variables (X). Obtain the typical diagnostic information and graphs.Discuss how well this model fits.Obtain predicted values (LN(Y)_hat) and plot them in a histogram.What issues do you see?Does this correct the issue?  
+
+Below is the model output for our second OLS regression model with STRESS log transformed.
+
+```{r}
+logSTRESS <- ifelse(df$STRESS == 0, 0, log(df$STRESS))
+ols2 <- lm(logSTRESS ~ COHES + ESTEEM + GRADES + SATTACH, data = df)
+summary(ols2)
+anova(ols2)
+```
+```{r}
+anova(ols2)
+```
+
+For any observations of STRESS that were equal to zero, I left them as zero and took the natural log of any non-zero observations since the log of zero is negative infinity. The model performed almost the same as the first OLS model. The coefficients are all very small negative numbers, and the adjusted R-squared value is almost identical (0.07095). The log transformation of STRESS didn't have any noticeable impact in terms of accounting for it's variance with the independent variables. Again, the coefficients being non-integer values isn't particularly meaningful from a practical point of view since the values of STRESS are integers.  
+
+```{r fig.align="center", fig.width=8, fig.height=8}
+par(mfrow=c(2,2))
+plot(ols2)
+```
+
+The diagnostic graphs show similar problems, violating our assumption of homogeneity of variance. There are high leveraged values as well. Overall, the OLS regression model doesn't appear to be a good fit for this type of data.
+
+```{r fig.align="center", fig.width=8, fig.height=4}
+hist(ols2$fitted.values, main = "Histogram of Fitted Values", xlab = "Fitted Values", col = "blue")
+
+
+z <- predict(ols2)
+hist(z, main = "Histogram of Fitted Values", xlab = "Fitted Values", col = "blue")
+```
+
+Once again, the fitted values are normally distributed (for the most part), but there are very few values predicted near zero despite that being the most commonly occurring value in the original data.
+
+# 4. Poisson Regression on STRESS  
+Use the glm() function to fit a Poisson Regression for STRESS (Y) using COHES, ESTEEM, GRADES, SATTACH as explanatory variables (X). Interpret the model’s coefficients and discuss how this model’s results compare to your answer for part 3). Similarly, fit an over-dispersed Poisson regression model using the same set of variables. How do these models compare?  
+
+## Poisson Model
+
+```{r}
+pois1 <- glm(STRESS ~ COHES + ESTEEM + GRADES + SATTACH, data = df, family = "poisson")
+summary(pois1)
+```
+
+The model coefficients are all still negative and very close to the model coefficients on the OLS model above. It's slightly difficult to interpret the coefficients of a Poisson models seeing as how they affect the change in the natural log of the dependent variable. In this case, a 1 unit increase in ESTEEM score (increase one integer value) results in a decrease of 0.023692 to the natural log of STRESS (when all other variables held constant). This means that as an adolescent has higher self-esteem, their stress level decreases when controlling for GRADES, COHES, and SATTACH.
+
+```{r fig.align="center", fig.width=8, fig.height=8}
+par(mfrow=c(2,2))
+plot(pois1, which = c(1,4))
+```
+```{r fig.align="center", fig.width=8, fig.height=4}
+hist(pois1$fitted.values, main = "Histogram of Fitted Values", xlab = "Fitted Values", col = "blue")
+```
+
+## Negative Binomial Model  
+
+```{r}
+nbr1 <- glm.nb(STRESS ~ COHES + ESTEEM + GRADES + SATTACH, data = df)
+summary(nbr1)
+```
+
+The negative binomial model has converged to an almost identical model as the Poisson regression model. The coefficients are nearly identical, however the AIC for the negative binomial model is 2283.6 while the AIC for the Poisson regression model is 2417.2. Following the general rule of thumb that a lower AIC is better, the second model is performing slightly better.
+
+```{r fig.align="center", fig.width=8, fig.height=8}
+par(mfrow=c(2,2))
+plot(nbr1, which = c(1, 4))
+```
+
+```{r fig.align="center", fig.width=8, fig.height=4}
+hist(nbr1$fitted.values, main = "Histogram of Fitted Values", xlab = "Fitted Values", col = "blue")
+```
+
+# 5. Cohesion Predictions  
+Based on the Poisson model in part 4), compute the predicted count of STRESS for those whose levels of family cohesion are less than one standard deviation below the mean (call this the low group), between one standard deviation below and one standard deviation above the mean (call this the middle group), and more than one standard deviation above the mean (high). What is the expected percent difference in the number of stressful events for those at high and low levels of family cohesion?  
+
+Cohesion groups breakdown:  
+
+```{r echo=TRUE}
+# Mean & SD
+mean_COHES <- mean(df$COHES)
+sd_COHES <- sd(df$COHES)
+# Calculate the groups
+df <- df %>%
+   mutate(COHES_cat = case_when(
+    COHES < (mean_COHES - sd_COHES) ~ "Low",
+    between(COHES, mean_COHES - sd_COHES, mean_COHES + sd_COHES) ~ "Middle",
+    COHES > (mean_COHES + sd_COHES) ~ "High"
+  ))
+
+table(df$COHES_cat)
+
+```
+```{r}
+df$y_hat <- fitted(nbr1)
+
+agg_df <- df %>%                               # Summary by group using dplyr
+   group_by(COHES_cat) %>% 
+   summarize(Mean = round(mean(y_hat),digits = 3)) %>%
+   arrange(match(COHES_cat, c("Low", "Middle", "High")))
+
+kable(agg_df)
+```
+```{r}
+(2.525/1.665)-1
+```
+```{r}
+(1-(1.178/1.665))
+```
+
+# 6. AIC & BIC  
+Compute the AICs and BICs from the Poisson Regression and the over-dispersed Poisson regression models from part 4). Is one better than the other?  
+
+```{r}
+poisBIC <- BIC(pois1)
+nbrBIC <- BIC(nbr1)
+
+poisBIC
+nbrBIC
+
+```
+
+# 7. Deviance Residuals  
+Using the Poisson regression model from part 4), plot the deviance residuals by the predicted values. Discuss what this plot indicates about the regression model.
+
+```{r}
+plot(
+  pois1$fitted.values,
+  residuals(pois1, type = "deviance"),
+  main = "Deviance Residuals vs Fitted Values",
+  xlab = "Fitted Values",
+  ylab = "Deviance Residuals",
+  pch = 19,
+  col = "blue"
+)
+```
+# 8. Logistic Regression  
+Create a new indicator variable (Y_IND) of STRESS that takes on a value of 0 if STRESS=0 and 1 if STRESS>0. This variable essentially measures is stress present, yes or no. Fit a logistic regression model to predict Y_IND using the variables using COHES, ESTEEM, GRADES, SATTACH as explanatory variables (X). Report the model, interpret the coefficients, obtain statistical information on goodness of fit, and discuss how well this model fits. Should you rerun the logistic regression analysis? If so, what should you do next?  
+
+```{r}
+df$Y_IND <- ifelse(df$STRESS == 0, 0, 1)
+lr1 <- glm(Y_IND ~ COHES + ESTEEM + GRADES + SATTACH, data = df, family = "binomial")
+summary(lr1)
+```
+
+
+```{r}
+int_odds_change <- round(exp(lr1$coefficients[1]), digits = 3)
+cohes_odds_change <- round(exp(lr1$coefficients[2]), digits = 3)
+esteem_odds_change <- round(exp(lr1$coefficients[3]), digits = 3)
+grades_odds_change <- round(exp(lr1$coefficients[4]), digits = 3)
+sattach_odds_change <- round(exp(lr1$coefficients[5]), digits = 3)
+```
+
+```{r}
+lr1_pi <- predict(lr1, type = 'response')
+df$outcome1<-ifelse(lr1_pi > 0.5,1,0)
+table(df$Y_IND, df$outcome1, dnn = c("STRESS", "Predict"))
+```
+If we look at a table of the prediction threshold vs the dichotomous stress variable we can see that our logistic regression model has achieved an accuracy of 66.5%.
+
+```{r}
+table(df$Y_IND, pi_lr_thresh, dnn = c("STRESS Yes or No", "Predict"))
+```
+
+```{r}
+(11+422)/(11+422+210+8)
+```
+```{r}
+accuracy_lr <- (422 + 11) / (422 + 11 + 8 + 210)
+precision_lr <- 422 / (422 + 201)
+recall_lr <- 422 / (422 + 8)
+```
+```{r}
+roccurve <- roc(df$Y_IND ~ df$outcome1)
+plot(roccurve)
+auc(roccurve)
+```
+```{r}
+plot(lr1, which = c(1,4))
+```
+
+# 9. ZIP Regression  
+It may be that there are two (or more) process at work that are overlapped and generating the distributions of STRESS(Y). What do you think those processes might be? To conduct a ZIP regression model by hand, fit a Logistic Regression model to predict if stress is present (Y_IND), and then use a Poisson Regression model to predict the number of stressful events (STRESS) conditioning on stress being present. Is it reasonable to use such a model? Combine the two fitted model to predict STRESS (Y). Obtained predicted values and residuals. How well does this model fit? HINT: You have to be thoughtful about this. It is not as straight forward as plug and chug!  
+
+```{r echo=TRUE}
+# Create Stress Level Variable
+# Turns 0 into NA
+df$StressCt <- ifelse(df$STRESS == 0, NA, df$STRESS)
+# Create binary stress variable
+df$STRESS_binary <- ifelse(df$STRESS == 0, 0, 1)
+```
+```{r}
+mean(df$STRESS_binary)
+```
+
+```{r echo=TRUE}
+# Logistic Regression Model on Dichotomous Stress Variable
+lr9 <- glm(STRESS_binary ~ COHES + ESTEEM + GRADES + SATTACH, data = df, family = "binomial")
+# Poisson Regression on Stress Level (excludes zeros)
+pois9 <- glm(StressCt ~ COHES + ESTEEM + GRADES + SATTACH, data = df, family = "poisson")
+```
+
+## Logistic Regression  
+Below is the summary of the logistic regression. It's the same model as the previous section.
+
+```{r}
+summary(lr9)
+```
+
+If we look at the histogram of predicted probabilities, we can see that there are quite a few > 0.5 which means our logistic regression isn't doing a great job classifying 0 values.
+
+```{r fig.width=8, fig.height=4}
+hist(lr1_pi, main = "Histogram of Probabilities", xlab = "Predicted Probabilities", col = "blue")
+```
+## Poisson Regression  
+Below is the summary of the Poisson regression with the Stress Level variable as the dependent variable.
+
+```{r}
+summary(pois9)
+```
+
+Below is a histogram of our combined predictions. We utilize the prediction probabilities from the logistic regression and the predicted values from the Poisson regression (without the zero values).
+
+```{r echo=TRUE, fig.width=8, fig.height=4}
+combined_yhat <- ifelse(lr1_pi <= 0.5, 0, pois9$fitted.values)
+hist(combined_yhat,
+     main = "Histogram of Predictions (ZIP Model)",
+     xlab = "Predicted Stressful Event Count",
+     col = "blue")
+```
+
+The histogram looks much more in line with what we would expect based on our baseline data.  However, the number of zeros predicted still feels low since that was the highest value in the original data.
+
+Below is a plot of the residuals. The residuals clearly follow a pattern. 
+
+```{r fig.width=8, fig.height=4}
+resid9 <- df$STRESS - combined_yhat
+plot(
+  df$STRESS,
+  resid9,
+  main = "Residuals vs Stress",
+  xlab = "Stress",
+  ylab = "Residuals",
+  pch = 19,
+  col = "blue"
+)
+```
+
+Based on the plot of the residuals and the Stress variable, the model seem to fit better than previous models. There is very little variance at each value of Stress.  
+
+# 10. ZIP Modeling  
+Use the pscl package and the zeroinfl() function to Fit a ZIP model to predict STRESS(Y). You should do this twice, first using the same predictor variable for both parts of the ZIP model. Second, finding the best fitting model. Report the results and goodness of fit measures. Synthesize your findings across all of these models, to reflect on what you think would be a good modeling approach for this data.
+
+Model 1:  
+
+```{r}
+zip10 <- zeroinfl(STRESS ~ COHES | COHES, data = df)
+summary(zip10)
+```
+```{r}
+## Exponentiated coefficients
+expCoef <- exp(coef((zip10)))
+expCoef <- matrix(round(expCoef,digits = 3), ncol = 2)
+rownames(expCoef) <- c("Intercept","COHES")
+colnames(expCoef) <- c("Count_model","Zero_inflation_model")
+expCoef
+```
+
+The count model coefficient for COHES represents a one unit increase in a feeling of cohesion results in a decrease of 0.015427 to the natural log of Stress. This is in the context of predicting the stress value IF the adolescent has stress.
+
+```{r}
+cohes_odds <- round(exp(-0.015427), digits = 3)
+```
+
+The zero-inflation model coefficient for cohesion is 0.02371. This means that the odds of having stress is increased by 98.5% when a feeling of cohesion is increased. This seems counter intuitive and is the opposite affect of the Poisson section of the model.
+
+Model 2:  
+
+```{r}
+zip_full <- zeroinfl(STRESS ~ COHES + ESTEEM + GRADES + SATTACH | COHES + ESTEEM + GRADES + SATTACH, data = df)
+summary(zip_full)
+```
+```{r}
+zip_r1 <- zeroinfl(STRESS ~ COHES + ESTEEM + GRADES | COHES + ESTEEM + GRADES + SATTACH, data = df)
+summary(zip_r1)
+```
+
+```{r}
+critical_chi<- qchisq(0.05,1,ncp=0,lower.tail=FALSE)
+critical_chi
+```
+
+
+```{r}
+#install.packages('lmtest')
+library(lmtest)
+## LRT to compare these models
+lmtest::lrtest(zip_full, zip_r1)
+```
+```{r}
+chisquare1 <- -2*(logLik(zip_r1)-logLik((zip_full)))
+
+```
+```{r}
+zip_r2 <- zeroinfl(STRESS ~ COHES + ESTEEM | COHES + ESTEEM + GRADES + SATTACH, data = df)
+summary(zip_r2)
+```
+```{r}
+lmtest::lrtest(zip_r1, zip_r2)
+```
+```{r}
+zip_r3 <- zeroinfl(STRESS ~ COHES | COHES + ESTEEM + GRADES + SATTACH, data = df)
+summary(zip_r3)
+```
+```{r}
+lmtest::lrtest(zip_r2, zip_r3)
+```
+
+
+```{r}
+zip_f_AIC <- round(AIC(zip_full), digits = 3)
+zip_r1_AIC <- round(AIC(zip_r1), digits = 3)
+zip_r2_AIC <- round(AIC(zip_r2), digits = 3)
+zip_r3_AIC <- round(AIC(zip_r3), digits = 3)
+
+zip_f_AIC
+zip_r1_AIC
+zip_r2_AIC
+zip_r3_AIC
+```
+```{r}
+summary(zip_r2)
+```
+
+
+```{r}
+## Exponentiated coefficients
+expCoef <- exp(coef((zip_r2)))
+expCoef <- matrix(round(expCoef,digits = 3), ncol = 2)
+rownames(expCoef) <- c("Intercept","COHES", )
+colnames(expCoef) <- c("Count_model","Zero_inflation_model")
+expCoef
+```
+```{r}
+df$pr_stress <- zip_r2$fitted.values
+```
+
+```{r}
+plot(zip_r2$fitted.values~zip_r2$residuals,
+     main = "Deviance Residuals vs Fitted Values",
+  xlab = "Fitted Values",
+  ylab = "Deviance Residuals",
+  pch = 19,
+  col = "blue")
+```
+
+```{r fig.align="center", fig.width=8, fig.height=8}
+par(mfrow=c(2,2))
+plot(zip_r2, which = c(1, 4))
+```
+
+```{r fig.align="center", fig.width=8, fig.height=4}
+hist(zip_r2$fitted.values, main = "Histogram of Fitted Values", xlab = "Fitted Values", col = "blue")
+```
+```
+
+The AIC of the second model is `r zip11AIC` which is lower than the AIC of `r zip10AIC` on the first model.
